@@ -11,6 +11,10 @@ import (
 	tree_sitter_python "github.com/tree-sitter/tree-sitter-python/bindings/go"
 	tree_sitter_javascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 	tree_sitter_rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
+	tree_sitter_typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
+	tree_sitter_c "github.com/tree-sitter/tree-sitter-c/bindings/go"
+	tree_sitter_cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
+	tree_sitter_java "github.com/tree-sitter/tree-sitter-java/bindings/go"
 )
 
 // LanguageRegistry manages all supported programming languages
@@ -60,6 +64,26 @@ func (lr *LanguageRegistry) initializeLanguages() error {
 			language:   sitter.NewLanguage(tree_sitter_rust.Language()),
 			extensions: []string{".rs"},
 		},
+		{
+			name:       "typescript",
+			language:   sitter.NewLanguage(tree_sitter_typescript.LanguageTypescript()),
+			extensions: []string{".ts", ".tsx", ".d.ts"},
+		},
+		{
+			name:       "c",
+			language:   sitter.NewLanguage(tree_sitter_c.Language()),
+			extensions: []string{".c", ".h"},
+		},
+		{
+			name:       "cpp",
+			language:   sitter.NewLanguage(tree_sitter_cpp.Language()),
+			extensions: []string{".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".h++"},
+		},
+		{
+			name:       "java",
+			language:   sitter.NewLanguage(tree_sitter_java.Language()),
+			extensions: []string{".java"},
+		},
 	}
 
 	for _, lang := range languages {
@@ -75,11 +99,6 @@ func (lr *LanguageRegistry) initializeLanguages() error {
 		} else {
 			fmt.Printf("Registered %s with tree-sitter\n", lang.name)
 		}
-	}
-
-	// Add TypeScript without tree-sitter for now (can be added later)
-	if err := lr.registerLanguage("typescript", nil, []string{".ts", ".tsx", ".d.ts"}); err != nil {
-		return fmt.Errorf("failed to register typescript: %w", err)
 	}
 
 	return nil

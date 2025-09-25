@@ -976,9 +976,12 @@ func min(a, b int) int {
 
 // newSymbolParser creates a new symbol parser instance
 func newSymbolParser() index.SymbolParser {
-	// This would return your actual symbol parser implementation
-	// For now, return a placeholder
-	return &placeholderParser{}
+	parser, err := index.NewTreeSitterSymbolParser()
+	if err != nil {
+		// Fallback to placeholder if tree-sitter initialization fails
+		return &placeholderParser{}
+	}
+	return parser
 }
 
 // Placeholder parser implementation
