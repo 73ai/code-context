@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -406,8 +407,11 @@ func TestIntegrationWatcher(t *testing.T) {
 	watcherConfig.Verbose = true
 
 	var eventCount int
+	var eventMutex sync.Mutex
 	watcherConfig.EventCallback = func(event WatchEvent) {
+		eventMutex.Lock()
 		eventCount++
+		eventMutex.Unlock()
 		t.Logf("Watch event: %s %s", event.Operation, event.Path)
 	}
 
@@ -480,11 +484,15 @@ func AnotherFunction() {
 	// Wait for events to be processed
 	time.Sleep(500 * time.Millisecond)
 
-	if eventCount == 0 {
+	eventMutex.Lock()
+	finalEventCount := eventCount
+	eventMutex.Unlock()
+
+	if finalEventCount == 0 {
 		t.Error("Expected to receive watch events")
 	}
 
-	t.Logf("Received %d watch events", eventCount)
+	t.Logf("Received %d watch events", finalEventCount)
 }
 
 // TestIntegrationPerformance tests performance under realistic conditions

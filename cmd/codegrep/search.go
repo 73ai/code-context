@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/73ai/code-context/internal/index"
 )
 
 // SearchResult represents a single search result
@@ -45,6 +49,7 @@ type SearchStats struct {
 type RealSearchEngine struct {
 	config     *Config
 	regexCache map[string]*regexp.Regexp
+	storage    index.Storage
 	mu         sync.RWMutex
 }
 
@@ -60,7 +65,55 @@ func NewRealSearchEngine(config *Config) (*RealSearchEngine, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Initialize storage if not disabled
+	if !config.NoIndex {
+		storage, err := engine.initializeStorage()
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize storage: %w", err)
+		}
+		engine.storage = storage
+
+		// Handle --rebuild-index flag
+		if config.RebuildIndex {
+			if err := engine.rebuildIndex(context.Background()); err != nil {
+				return nil, fmt.Errorf("failed to rebuild index: %w", err)
+			}
+		}
+	}
+
 	return engine, nil
+}
+
+// initializeStorage sets up the BadgerDB storage backend
+func (e *RealSearchEngine) initializeStorage() (index.Storage, error) {
+	// Determine index path
+	indexPath := e.config.IndexPath
+	if indexPath == "" {
+		// Default to .codegrep directory in the first search path
+		basePath := "."
+		if len(e.config.Paths) > 0 {
+			basePath = e.config.Paths[0]
+		}
+
+		// Get absolute path
+		absPath, err := filepath.Abs(basePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get absolute path for %s: %w", basePath, err)
+		}
+
+		indexPath = filepath.Join(absPath, ".codegrep")
+	}
+
+	// Create BadgerDB options
+	opts := index.DefaultBadgerOptions(indexPath)
+
+	// Create storage
+	storage, err := index.NewBadgerStorage(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create BadgerDB storage at %s: %w", indexPath, err)
+	}
+
+	return storage, nil
 }
 
 // Search executes the search based on configuration
@@ -87,6 +140,15 @@ func (e *RealSearchEngine) Close() error {
 
 	// Clear regex cache
 	e.regexCache = make(map[string]*regexp.Regexp)
+
+	// Close storage if initialized
+	if e.storage != nil {
+		if err := e.storage.Close(); err != nil {
+			return fmt.Errorf("failed to close storage: %w", err)
+		}
+		e.storage = nil
+	}
+
 	return nil
 }
 
@@ -178,28 +240,339 @@ func (e *RealSearchEngine) searchRegex(ctx context.Context, results *SearchResul
 }
 
 func (e *RealSearchEngine) searchSemantic(ctx context.Context, results *SearchResults) (*SearchResults, error) {
-	// Semantic search implementation would go here
-	// For now, return a placeholder
-	results.Results = []SearchResult{
-		{
-			File:     "example.go",
-			LineNumber: 42,
-			Match:    fmt.Sprintf("semantic match for '%s'", e.config.Pattern),
-			Metadata: map[string]string{
-				"type": e.getSemanticType(),
-				"scope": "function",
-			},
-		},
+	// Check if storage is available
+	if e.storage == nil {
+		return nil, fmt.Errorf("semantic search requires storage but storage is disabled (use --no-index=false)")
 	}
 
+	// Create store wrapper
+	store := index.NewStore(e.storage, index.DefaultStoreConfig())
+
+	var searchResults []SearchResult
+	var err error
+
+	// Determine search type and execute appropriate search
+	switch {
+	case e.config.Symbols:
+		searchResults, err = e.searchSymbols(ctx, store, e.config.Pattern)
+	case e.config.Refs:
+		searchResults, err = e.searchReferences(ctx, store, e.config.Pattern)
+	case e.config.Types:
+		searchResults, err = e.searchTypes(ctx, store, e.config.Pattern)
+	case e.config.CallGraph:
+		searchResults, err = e.searchCallGraph(ctx, store, e.config.Pattern)
+	default:
+		return nil, fmt.Errorf("no semantic search type specified")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("semantic search failed: %w", err)
+	}
+
+	// Apply limits if specified
+	if e.config.MaxCount > 0 && len(searchResults) > e.config.MaxCount {
+		searchResults = searchResults[:e.config.MaxCount]
+	}
+
+	results.Results = searchResults
 	results.Stats = SearchStats{
-		FilesSearched: 1,
-		Matches:       1,
+		FilesSearched: e.countUniqueFiles(searchResults),
+		Matches:       len(searchResults),
 		Duration:      time.Since(results.Timestamp),
 		Engine:        "semantic",
 	}
 
 	return results, nil
+}
+
+// searchSymbols searches for symbol definitions
+func (e *RealSearchEngine) searchSymbols(ctx context.Context, store *index.Store, pattern string) ([]SearchResult, error) {
+	// Search by name using the store's search functionality
+	query := index.SearchQuery{
+		Type:   index.SearchByName,
+		Term:   pattern,
+		Limit:  e.config.MaxCount,
+		SortBy: index.SortOption{Field: "name"},
+	}
+
+	result, err := store.SearchSymbols(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search symbols: %w", err)
+	}
+
+	// Convert symbols to search results
+	var searchResults []SearchResult
+	for _, symbol := range result.Symbols {
+		searchResult := SearchResult{
+			File:       symbol.FilePath,
+			LineNumber: symbol.StartLine,
+			Column:     symbol.StartCol,
+			Match:      symbol.Name,
+			Metadata: map[string]string{
+				"type":      symbol.Type,
+				"kind":      symbol.Kind,
+				"signature": symbol.Signature,
+				"scope":     "symbol",
+			},
+		}
+
+		// Add doc string as context if available
+		if symbol.DocString != "" {
+			if searchResult.Context == nil {
+				searchResult.Context = make(map[string]string)
+			}
+			searchResult.Context["documentation"] = symbol.DocString
+		}
+
+		searchResults = append(searchResults, searchResult)
+	}
+
+	return searchResults, nil
+}
+
+// searchReferences searches for symbol references
+func (e *RealSearchEngine) searchReferences(ctx context.Context, store *index.Store, pattern string) ([]SearchResult, error) {
+	// First find the symbols that match the pattern
+	symbolQuery := index.SearchQuery{
+		Type: index.SearchByName,
+		Term: pattern,
+	}
+
+	symbolResult, err := store.SearchSymbols(ctx, symbolQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for symbols: %w", err)
+	}
+
+	if len(symbolResult.Symbols) == 0 {
+		// No symbols found, return empty results
+		return []SearchResult{}, nil
+	}
+
+	// For each symbol, search for references
+	var searchResults []SearchResult
+	for _, symbol := range symbolResult.Symbols {
+		refs, err := e.findReferencesForSymbol(ctx, store, symbol.ID, symbol.FilePath)
+		if err != nil {
+			continue // Skip on error, don't fail the entire search
+		}
+
+		searchResults = append(searchResults, refs...)
+
+		// Respect max count limit
+		if e.config.MaxCount > 0 && len(searchResults) >= e.config.MaxCount {
+			searchResults = searchResults[:e.config.MaxCount]
+			break
+		}
+	}
+
+	return searchResults, nil
+}
+
+// searchTypes searches for type definitions
+func (e *RealSearchEngine) searchTypes(ctx context.Context, store *index.Store, pattern string) ([]SearchResult, error) {
+	// Search by type using the store's search functionality
+	query := index.SearchQuery{
+		Type:   index.SearchByType,
+		Term:   pattern,
+		Limit:  e.config.MaxCount,
+		SortBy: index.SortOption{Field: "name"},
+	}
+
+	result, err := store.SearchSymbols(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search types: %w", err)
+	}
+
+	// Convert symbols to search results, filtering for type definitions
+	var searchResults []SearchResult
+	for _, symbol := range result.Symbols {
+		// Only include symbols that are actual type definitions
+		if symbol.Kind == "type" || symbol.Kind == "struct" || symbol.Kind == "interface" ||
+		   symbol.Kind == "enum" || symbol.Kind == "class" {
+			searchResult := SearchResult{
+				File:       symbol.FilePath,
+				LineNumber: symbol.StartLine,
+				Column:     symbol.StartCol,
+				Match:      symbol.Name,
+				Metadata: map[string]string{
+					"type":      symbol.Type,
+					"kind":      symbol.Kind,
+					"signature": symbol.Signature,
+					"scope":     "type",
+				},
+			}
+
+			// Add doc string as context if available
+			if symbol.DocString != "" {
+				if searchResult.Context == nil {
+					searchResult.Context = make(map[string]string)
+				}
+				searchResult.Context["documentation"] = symbol.DocString
+			}
+
+			searchResults = append(searchResults, searchResult)
+		}
+	}
+
+	return searchResults, nil
+}
+
+// searchCallGraph searches for call relationships
+func (e *RealSearchEngine) searchCallGraph(ctx context.Context, store *index.Store, pattern string) ([]SearchResult, error) {
+	// First find the function that matches the pattern
+	symbolQuery := index.SearchQuery{
+		Type: index.SearchByName,
+		Term: pattern,
+		Filters: []index.Filter{
+			{Field: "kind", Operator: "equals", Value: "function"},
+		},
+	}
+
+	symbolResult, err := store.SearchSymbols(ctx, symbolQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for functions: %w", err)
+	}
+
+	if len(symbolResult.Symbols) == 0 {
+		return []SearchResult{}, nil
+	}
+
+	// For each function, find call references
+	var searchResults []SearchResult
+	for _, symbol := range symbolResult.Symbols {
+		// Add the function definition itself
+		searchResults = append(searchResults, SearchResult{
+			File:       symbol.FilePath,
+			LineNumber: symbol.StartLine,
+			Column:     symbol.StartCol,
+			Match:      symbol.Name,
+			Metadata: map[string]string{
+				"type":       symbol.Type,
+				"kind":       symbol.Kind,
+				"signature":  symbol.Signature,
+				"scope":      "definition",
+				"call_type":  "definition",
+			},
+		})
+
+		// Find calls to this function
+		callRefs, err := e.findCallsForSymbol(ctx, store, symbol.ID, symbol.FilePath)
+		if err != nil {
+			continue // Skip on error
+		}
+
+		searchResults = append(searchResults, callRefs...)
+
+		// Respect max count limit
+		if e.config.MaxCount > 0 && len(searchResults) >= e.config.MaxCount {
+			searchResults = searchResults[:e.config.MaxCount]
+			break
+		}
+	}
+
+	return searchResults, nil
+}
+
+// Helper methods for finding references and calls
+func (e *RealSearchEngine) findReferencesForSymbol(ctx context.Context, store *index.Store, symbolID, filePath string) ([]SearchResult, error) {
+	// Search for references using the ref prefix
+	symbolHash := e.hashString(symbolID)
+	prefix := []byte("ref:" + symbolHash + ":")
+
+	var results []SearchResult
+	iter := store.Storage().Scan(ctx, prefix, index.ScanOptions{})
+	defer iter.Close()
+
+	for iter.Next() {
+		var ref index.Reference
+		if err := index.UnmarshalValue(iter.Value(), &ref); err != nil {
+			continue // Skip corrupted entries
+		}
+
+		results = append(results, SearchResult{
+			File:       ref.FilePath,
+			LineNumber: ref.Line,
+			Column:     ref.Column,
+			Match:      symbolID, // Use symbol name as match
+			Metadata: map[string]string{
+				"kind":  ref.Kind,
+				"scope": "reference",
+			},
+			Context: map[string]string{
+				"context": ref.Context,
+			},
+		})
+
+		if e.config.MaxCount > 0 && len(results) >= e.config.MaxCount {
+			break
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (e *RealSearchEngine) findCallsForSymbol(ctx context.Context, store *index.Store, symbolID, filePath string) ([]SearchResult, error) {
+	// Search for calls using the ref prefix, filtering for call kind
+	symbolHash := e.hashString(symbolID)
+	prefix := []byte("ref:" + symbolHash + ":")
+
+	var results []SearchResult
+	iter := store.Storage().Scan(ctx, prefix, index.ScanOptions{})
+	defer iter.Close()
+
+	for iter.Next() {
+		var ref index.Reference
+		if err := index.UnmarshalValue(iter.Value(), &ref); err != nil {
+			continue // Skip corrupted entries
+		}
+
+		// Only include call references
+		if ref.Kind == "call" {
+			results = append(results, SearchResult{
+				File:       ref.FilePath,
+				LineNumber: ref.Line,
+				Column:     ref.Column,
+				Match:      symbolID, // Use symbol name as match
+				Metadata: map[string]string{
+					"kind":      ref.Kind,
+					"scope":     "call",
+					"call_type": "invocation",
+				},
+				Context: map[string]string{
+					"context": ref.Context,
+				},
+			})
+
+			if e.config.MaxCount > 0 && len(results) >= e.config.MaxCount {
+				break
+			}
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// countUniqueFiles counts unique files in search results
+func (e *RealSearchEngine) countUniqueFiles(results []SearchResult) int {
+	fileMap := make(map[string]bool)
+	for _, result := range results {
+		fileMap[result.File] = true
+	}
+	return len(fileMap)
+}
+
+// hashString creates a SHA256 hash for a string
+func (e *RealSearchEngine) hashString(input string) string {
+	hash := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(hash[:])
 }
 
 func (e *RealSearchEngine) getSemanticType() string {
@@ -599,6 +972,73 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// newSymbolParser creates a new symbol parser instance
+func newSymbolParser() index.SymbolParser {
+	// This would return your actual symbol parser implementation
+	// For now, return a placeholder
+	return &placeholderParser{}
+}
+
+// Placeholder parser implementation
+type placeholderParser struct{}
+
+func (p *placeholderParser) ParseFile(ctx context.Context, filePath string) ([]index.SymbolInfo, error) {
+	// Placeholder implementation - in a real implementation, this would parse the file
+	// using tree-sitter or similar and extract actual symbols
+	return []index.SymbolInfo{}, nil
+}
+
+func (p *placeholderParser) SupportedLanguages() []string {
+	return []string{"Go", "Python", "JavaScript", "TypeScript", "Java", "C++", "C", "Rust"}
+}
+
+func (p *placeholderParser) IsSupported(filePath string) bool {
+	ext := filepath.Ext(filePath)
+	supportedExts := map[string]bool{
+		".go": true, ".py": true, ".js": true, ".ts": true, ".tsx": true,
+		".java": true, ".cpp": true, ".cc": true, ".cxx": true, ".c": true,
+		".h": true, ".hpp": true, ".rs": true,
+	}
+	return supportedExts[ext]
+}
+
+// rebuildIndex rebuilds the semantic search index
+func (e *RealSearchEngine) rebuildIndex(ctx context.Context) error {
+	if e.storage == nil {
+		return fmt.Errorf("storage not initialized")
+	}
+
+	fmt.Printf("🔨 Rebuilding semantic index...\n")
+
+	// Create store and parser
+	store := index.NewStore(e.storage, index.DefaultStoreConfig())
+	parser := newSymbolParser()
+
+	// Configure builder
+	builderConfig := index.DefaultBuilderConfig()
+	builderConfig.ReportProgress = true
+	builderConfig.Verbose = false // Keep quiet during search
+
+	builder := index.NewBuilder(store, parser, builderConfig)
+
+	// Rebuild index for the configured paths
+	startTime := time.Now()
+	stats, err := builder.RebuildIndex(ctx, e.config.Paths...)
+	if err != nil {
+		return fmt.Errorf("index rebuild failed: %w", err)
+	}
+
+	duration := time.Since(startTime)
+	fmt.Printf("✅ Index rebuilt: %d files, %d symbols in %v\n",
+		stats.FilesProcessed, stats.SymbolsIndexed, duration.Round(time.Millisecond))
+
+	if stats.FilesErrored > 0 {
+		fmt.Printf("⚠️  %d files had errors during indexing\n", stats.FilesErrored)
+	}
+
+	return nil
 }
 
 // Update the newSearchEngine function in root.go to use RealSearchEngine
