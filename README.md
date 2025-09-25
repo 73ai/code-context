@@ -24,3 +24,8 @@ We're building codegrep - a high-performance code search and intelligence tool t
   - LLMs are reduced to guessing without proper code context
 
   codegrep bridges this gap - providing semantic accuracy with grep-level performance.
+
+
+  ### Getting Started
+
+  Semantic search: `--symbols`, `--refs`, `--types`, `--call-graph`

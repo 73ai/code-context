@@ -75,14 +75,14 @@ func (s *Store) StoreSymbol(ctx context.Context, symbol SymbolInfo) error {
 	batch.Set(symbolKey, symbolData)
 
 	// Create name index
-	nameKey := NameKey(strings.ToLower(symbol.Name))
+	nameKey := NameKey(symbol.Name)
 	if err := s.addToIndex(ctx, batch, nameKey, symbol.ID); err != nil {
 		return fmt.Errorf("failed to update name index: %w", err)
 	}
 
 	// Create type index
 	if symbol.Type != "" {
-		typeKey := TypeKey(strings.ToLower(symbol.Type))
+		typeKey := TypeKey(symbol.Type)
 		if err := s.addToIndex(ctx, batch, typeKey, symbol.ID); err != nil {
 			return fmt.Errorf("failed to update type index: %w", err)
 		}
@@ -90,7 +90,7 @@ func (s *Store) StoreSymbol(ctx context.Context, symbol SymbolInfo) error {
 
 	// Create tag indices
 	for _, tag := range symbol.Tags {
-		tagKey := TagKey(strings.ToLower(tag))
+		tagKey := TagKey(tag)
 		if err := s.addToIndex(ctx, batch, tagKey, symbol.ID); err != nil {
 			return fmt.Errorf("failed to update tag index: %w", err)
 		}
@@ -134,14 +134,14 @@ func (s *Store) DeleteSymbol(ctx context.Context, filePath, symbolID string) err
 	batch.Delete(symbolKey)
 
 	// Remove from name index
-	nameKey := NameKey(strings.ToLower(symbol.Name))
+	nameKey := NameKey(symbol.Name)
 	if err := s.removeFromIndex(ctx, batch, nameKey, symbolID); err != nil {
 		return fmt.Errorf("failed to update name index: %w", err)
 	}
 
 	// Remove from type index
 	if symbol.Type != "" {
-		typeKey := TypeKey(strings.ToLower(symbol.Type))
+		typeKey := TypeKey(symbol.Type)
 		if err := s.removeFromIndex(ctx, batch, typeKey, symbolID); err != nil {
 			return fmt.Errorf("failed to update type index: %w", err)
 		}
@@ -149,7 +149,7 @@ func (s *Store) DeleteSymbol(ctx context.Context, filePath, symbolID string) err
 
 	// Remove from tag indices
 	for _, tag := range symbol.Tags {
-		tagKey := TagKey(strings.ToLower(tag))
+		tagKey := TagKey(tag)
 		if err := s.removeFromIndex(ctx, batch, tagKey, symbolID); err != nil {
 			return fmt.Errorf("failed to update tag index: %w", err)
 		}
@@ -241,16 +241,16 @@ func (s *Store) DeleteFile(ctx context.Context, filePath string) error {
 		batch.Delete(symbolKey)
 
 		// Remove from indices
-		nameKey := NameKey(strings.ToLower(symbol.Name))
+		nameKey := NameKey(symbol.Name)
 		s.removeFromIndexBatch(batch, nameKey, symbol.ID)
 
 		if symbol.Type != "" {
-			typeKey := TypeKey(strings.ToLower(symbol.Type))
+			typeKey := TypeKey(symbol.Type)
 			s.removeFromIndexBatch(batch, typeKey, symbol.ID)
 		}
 
 		for _, tag := range symbol.Tags {
-			tagKey := TagKey(strings.ToLower(tag))
+			tagKey := TagKey(tag)
 			s.removeFromIndexBatch(batch, tagKey, symbol.ID)
 		}
 	}
@@ -522,9 +522,13 @@ func (s *Store) removeFromIndexBatch(batch Batch, indexKey []byte, symbolID stri
 // Search implementation
 
 func (s *Store) searchByName(ctx context.Context, name string) ([]string, error) {
-	nameKey := NameKey(strings.ToLower(name))
+	nameKey := NameKey(name)
 	data, err := s.storage.Get(ctx, nameKey)
 	if err != nil {
+		// Return empty slice for key not found instead of propagating error
+		if err == ErrKeyNotFound {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 
@@ -537,9 +541,13 @@ func (s *Store) searchByName(ctx context.Context, name string) ([]string, error)
 }
 
 func (s *Store) searchByType(ctx context.Context, typeName string) ([]string, error) {
-	typeKey := TypeKey(strings.ToLower(typeName))
+	typeKey := TypeKey(typeName)
 	data, err := s.storage.Get(ctx, typeKey)
 	if err != nil {
+		// Return empty slice for key not found instead of propagating error
+		if err == ErrKeyNotFound {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 
@@ -552,9 +560,13 @@ func (s *Store) searchByType(ctx context.Context, typeName string) ([]string, er
 }
 
 func (s *Store) searchByTag(ctx context.Context, tag string) ([]string, error) {
-	tagKey := TagKey(strings.ToLower(tag))
+	tagKey := TagKey(tag)
 	data, err := s.storage.Get(ctx, tagKey)
 	if err != nil {
+		// Return empty slice for key not found instead of propagating error
+		if err == ErrKeyNotFound {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 

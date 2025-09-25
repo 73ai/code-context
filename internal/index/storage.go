@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -192,15 +193,15 @@ func RefKey(symbolHash, fileHash string, line int) []byte {
 }
 
 func NameKey(name string) []byte {
-	return []byte(PrefixName + name)
+	return []byte(PrefixName + strings.ToLower(name))
 }
 
 func TypeKey(typeName string) []byte {
-	return []byte(PrefixType + typeName)
+	return []byte(PrefixType + strings.ToLower(typeName))
 }
 
 func TagKey(tag string) []byte {
-	return []byte(PrefixTag + tag)
+	return []byte(PrefixTag + strings.ToLower(tag))
 }
 
 func QueryKey(queryHash string) []byte {

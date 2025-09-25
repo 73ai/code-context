@@ -315,7 +315,7 @@ func TestKeyGeneration(t *testing.T) {
 	}
 
 	nameKey := NameKey("TestFunction")
-	expectedNameKey := []byte("name:TestFunction")
+	expectedNameKey := []byte("name:testfunction")  // NameKey converts to lowercase
 	if string(nameKey) != string(expectedNameKey) {
 		t.Errorf("NameKey mismatch: expected %s, got %s", expectedNameKey, nameKey)
 	}
