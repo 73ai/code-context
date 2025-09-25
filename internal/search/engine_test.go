@@ -305,9 +305,9 @@ func createTestDirectory(t *testing.T) string {
 
 	// Create test files
 	testFiles := map[string]string{
-		"file1.txt": "This is a test file\nwith multiple lines\ncontaining test data",
-		"file2.txt": "Another test file\nwith different content\nfor testing purposes",
-		"file3.log": "Log file with test entries\nINFO: test started\nERROR: test failed",
+		"file1.txt": "This is a Test file\nwith multiple lines\ncontaining test data",
+		"file2.txt": "Another test file\nwith different content\nfor Testing purposes",
+		"file3.log": "Log file with Test entries\nINFO: test started\nERROR: test failed",
 	}
 
 	for filename, content := range testFiles {

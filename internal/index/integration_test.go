@@ -167,6 +167,7 @@ const DEFAULT_CONFIG: Config = {
 	// Create storage
 	dbDir := filepath.Join(tmpDir, "db")
 	opts := DefaultBadgerOptions(dbDir)
+	opts.SyncWrites = true // Enable synchronous writes for testing to ensure data consistency
 	storage, err := NewBadgerStorage(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -387,6 +388,7 @@ func TestIntegrationWatcher(t *testing.T) {
 	// Create storage and store
 	dbDir := filepath.Join(tmpDir, "db")
 	opts := DefaultBadgerOptions(dbDir)
+	opts.SyncWrites = true // Enable synchronous writes for testing to ensure data consistency
 	storage, err := NewBadgerStorage(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -531,6 +533,7 @@ const CONSTANT%d = %d
 	// Create storage
 	dbDir := filepath.Join(tmpDir, "db")
 	opts := DefaultBadgerOptions(dbDir)
+	opts.SyncWrites = true // Enable synchronous writes for testing to ensure data consistency
 	storage, err := NewBadgerStorage(opts)
 	if err != nil {
 		t.Fatal(err)

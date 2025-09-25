@@ -137,6 +137,11 @@ func (im *IgnoreManager) loadIgnoreFile(path string) (*IgnoreFile, error) {
 func (im *IgnoreManager) parseRule(pattern, baseDir string, lineNum int, source string) (*IgnoreRule, error) {
 	original := pattern
 
+	// Handle comments - should return error as they should be filtered before parseRule
+	if strings.HasPrefix(strings.TrimSpace(pattern), "#") {
+		return nil, fmt.Errorf("comments should be filtered out before parseRule")
+	}
+
 	rule := &IgnoreRule{
 		Pattern: original,
 		BaseDir: baseDir,
@@ -161,7 +166,9 @@ func (im *IgnoreManager) parseRule(pattern, baseDir string, lineNum int, source 
 	if strings.HasPrefix(pattern, "/") {
 		rule.Anchored = true
 		pattern = pattern[1:] // Remove the leading slash
-	} else if strings.Contains(pattern, "/") {
+	} else if strings.Contains(pattern, "/") && !strings.HasPrefix(pattern, "**/") {
+		// Only consider it anchored if it contains "/" but doesn't start with "**/",
+		// because "**/" patterns are meant to match anywhere in the directory tree
 		rule.Anchored = true
 	}
 
@@ -315,17 +322,25 @@ func (im *IgnoreManager) ruleMatches(rule *IgnoreRule, relPath string, isDir boo
 			return true
 		}
 
-		// For directory patterns, also check if this suffix represents a parent directory
-		if rule.DirOnly {
-			for j := i; j < len(parts); j++ {
-				parentPath := strings.Join(parts[i:j+1], "/")
-				if rule.Regex.MatchString(parentPath) {
-					// If this matches the full path and it's not a directory, don't match
-					if i == 0 && j+1 == len(parts) && !isDir {
-						continue
-					}
+		// Also check each individual component for directory matching
+		component := parts[i]
+		if rule.Regex.MatchString(component) {
+			// This component matches, so any file under it should be ignored
+			// unless it's a directory-only pattern and we're checking the exact match
+			if rule.DirOnly {
+				// For directory-only patterns, match if:
+				// 1. This is the exact component and it's a directory, OR
+				// 2. This is a parent component (i.e., we have more path parts after this)
+				if i == len(parts)-1 {
+					// This is the last component - only match if it's a directory
+					return isDir
+				} else {
+					// This is a parent component - always match
 					return true
 				}
+			} else {
+				// Non-directory-only patterns match files under matching directories
+				return true
 			}
 		}
 	}
@@ -481,4 +496,9 @@ func (im *IgnoreManager) AddCommonPatterns(language string) error {
 	}
 
 	return nil
+}
+
+// ParseRuleForDebug exposes rule parsing for debugging purposes
+func (im *IgnoreManager) ParseRuleForDebug(pattern, baseDir string, lineNum int, source string) (*IgnoreRule, error) {
+	return im.parseRule(pattern, baseDir, lineNum, source)
 }

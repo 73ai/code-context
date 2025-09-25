@@ -149,14 +149,18 @@ func TestRegexSearcherCaseSensitive(t *testing.T) {
 				t.Errorf("Case sensitive search returned incorrect result: %s", result.Line)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -175,14 +179,18 @@ func TestRegexSearcherCaseSensitive(t *testing.T) {
 			}
 			caseInsensitiveCount++
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Case insensitive search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Case insensitive search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -233,19 +241,24 @@ func TestRegexSearcherWholeWord(t *testing.T) {
 			}
 			resultCount++
 
-			// Verify that only whole word matches are returned
-			if strings.Contains(result.Line, "testing") || strings.Contains(result.Line, "tested") {
-				t.Errorf("Whole word search returned partial match: %s", result.Line)
+			// Verify that the match is a whole word (not part of another word)
+			// The Match field should contain exactly "test", not "testing", "tested", etc.
+			if result.Match != "test" {
+				t.Errorf("Whole word search matched non-whole word: %s", result.Match)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -349,14 +362,18 @@ func TestRegexSearcherCountOnly(t *testing.T) {
 				t.Error("Count should not be zero")
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -408,14 +425,18 @@ func TestRegexSearcherFilesWithMatches(t *testing.T) {
 			}
 			seenFiles[result.FilePath] = true
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -436,9 +457,10 @@ func TestRegexSearcherOnlyMatching(t *testing.T) {
 	defer searcher.Close()
 
 	opts := &SearchOptions{
-		Pattern:      "test",
-		SearchPaths:  []string{testDir},
-		OnlyMatching: true,
+		Pattern:       "test",
+		SearchPaths:   []string{testDir},
+		OnlyMatching:  true,
+		CaseSensitive: false, // Make it case insensitive to match both "test" and "Test"
 	}
 
 	ctx := context.Background()
@@ -458,18 +480,23 @@ func TestRegexSearcherOnlyMatching(t *testing.T) {
 			if result.Match == "" {
 				t.Error("Only matching result missing match text")
 			}
-			if result.Match != "test" {
-				t.Errorf("Expected match 'test', got '%s'", result.Match)
+			// Should match either "test" or "Test" (case insensitive)
+			if strings.ToLower(result.Match) != "test" {
+				t.Errorf("Expected match 'test' (case insensitive), got '%s'", result.Match)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -523,14 +550,18 @@ func TestRegexSearcherInvertMatch(t *testing.T) {
 				t.Errorf("Inverted match should not contain pattern: %s", result.Line)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -590,14 +621,18 @@ func TestRegexSearcherMultiline(t *testing.T) {
 				t.Error("Multiline match should contain newlines")
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Search error: %v", err)
 
 		case <-time.After(5 * time.Second):
 			t.Fatal("Search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}

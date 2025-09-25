@@ -65,11 +65,15 @@ func (lr *LanguageRegistry) initializeLanguages() error {
 	for _, lang := range languages {
 		if err := lr.registerLanguage(lang.name, lang.language, lang.extensions); err != nil {
 			// Don't fail completely if a language fails to register - log warning and continue
-			fmt.Printf("Warning: failed to register %s: %v\n", lang.name, err)
-			// Register without tree-sitter parser as fallback
+			fmt.Printf("Warning: failed to register %s with tree-sitter: %v\n", lang.name, err)
+			// Register without tree-sitter parser as fallback (will use regex-based parsing)
 			if err := lr.registerLanguage(lang.name, nil, lang.extensions); err != nil {
-				return fmt.Errorf("failed to register %s (fallback): %w", lang.name, err)
+				fmt.Printf("Warning: failed to register %s (fallback): %v\n", lang.name, err)
+				continue // Don't fail completely, just skip this language
 			}
+			fmt.Printf("Registered %s with regex fallback\n", lang.name)
+		} else {
+			fmt.Printf("Registered %s with tree-sitter\n", lang.name)
 		}
 	}
 

@@ -427,12 +427,26 @@ func isBinaryContent(content []byte) bool {
 		return true
 	}
 
-	// Count non-printable characters
+	// Count non-printable characters and consecutive sequences
 	nonPrintable := 0
+	consecutiveNonPrintable := 0
+	maxConsecutive := 0
+
 	for _, b := range content {
 		if b < 32 && b != 9 && b != 10 && b != 13 {
 			nonPrintable++
+			consecutiveNonPrintable++
+			if consecutiveNonPrintable > maxConsecutive {
+				maxConsecutive = consecutiveNonPrintable
+			}
+		} else {
+			consecutiveNonPrintable = 0
 		}
+	}
+
+	// If we have 3 or more consecutive non-printable characters, likely binary
+	if maxConsecutive >= 3 {
+		return true
 	}
 
 	// If more than 30% are non-printable, consider it binary

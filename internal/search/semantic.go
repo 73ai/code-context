@@ -597,12 +597,15 @@ type GoParser struct{}
 
 // ParseFile parses a Go source file and extracts symbols
 func (gp *GoParser) ParseFile(filePath string, content []byte) ([]*Symbol, error) {
-	// Create a temporary parser instance for parsing
-	tsParser := parser.NewTreeSitterParser()
-	defer tsParser.Close()
+	// Create a language registry with Go support
+	languageRegistry, err := parser.NewLanguageRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create language registry: %w", err)
+	}
+	defer languageRegistry.Close()
 
-	// This is a simplified implementation for test compatibility
-	// In a real implementation, this would use the proper tree-sitter Go parser
+	// Get the parser from the registry
+	tsParser := languageRegistry.GetParser()
 
 	result, err := tsParser.ParseFile(filePath, content)
 	if err != nil {

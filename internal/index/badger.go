@@ -285,9 +285,11 @@ func (bs *BadgerStorage) WriteBatch(ctx context.Context, batch Batch) error {
 // badgerIterator implements the Iterator interface
 type badgerIterator struct {
 	iter   *badger.Iterator
+	txn    *badger.Txn
 	ctx    context.Context
 	err    error
 	closed bool
+	first  bool // Track if this is the first call to Next()
 }
 
 func (bi *badgerIterator) Next() bool {
@@ -303,6 +305,15 @@ func (bi *badgerIterator) Next() bool {
 	default:
 	}
 
+	// For the first call, don't advance - just check if we have a valid item
+	// For subsequent calls, advance to the next item
+	if !bi.first {
+		bi.first = true
+		return bi.iter.Valid()
+	}
+
+	// Advance to the next item
+	bi.iter.Next()
 	return bi.iter.Valid()
 }
 
@@ -333,6 +344,10 @@ func (bi *badgerIterator) Error() error {
 func (bi *badgerIterator) Close() {
 	if !bi.closed {
 		bi.iter.Close()
+		if bi.txn != nil {
+			bi.txn.Discard()
+			bi.txn = nil
+		}
 		bi.closed = true
 	}
 }
@@ -345,31 +360,29 @@ func (bs *BadgerStorage) Scan(ctx context.Context, prefix []byte, opts ScanOptio
 		atomic.AddInt64(&bs.stats.totalScanTime, time.Since(start).Nanoseconds())
 	}()
 
-	var iter *badger.Iterator
+	// Create a read transaction that will be managed by the iterator
+	txn := bs.db.NewTransaction(false)
+	badgerOpts := badger.DefaultIteratorOptions
+	badgerOpts.Reverse = opts.Reverse
+	badgerOpts.PrefetchValues = !opts.KeysOnly
 
-	bs.db.View(func(txn *badger.Txn) error {
-		badgerOpts := badger.DefaultIteratorOptions
-		badgerOpts.Reverse = opts.Reverse
-		badgerOpts.PrefetchValues = !opts.KeysOnly
+	iter := txn.NewIterator(badgerOpts)
 
-		iter = txn.NewIterator(badgerOpts)
-
-		// Position the iterator
-		if opts.StartAfter != nil {
-			iter.Seek(opts.StartAfter)
-			if iter.Valid() && string(iter.Item().Key()) == string(opts.StartAfter) {
-				iter.Next() // Skip the StartAfter key itself
-			}
-		} else {
-			iter.Seek(prefix)
+	// Position the iterator
+	if opts.StartAfter != nil {
+		iter.Seek(opts.StartAfter)
+		if iter.Valid() && string(iter.Item().Key()) == string(opts.StartAfter) {
+			iter.Next() // Skip the StartAfter key itself
 		}
-
-		return nil
-	})
+	} else {
+		iter.Seek(prefix)
+	}
 
 	return &badgerIterator{
-		iter: iter,
-		ctx:  ctx,
+		iter:  iter,
+		txn:   txn,
+		ctx:   ctx,
+		first: false,
 	}
 }
 
@@ -434,8 +447,10 @@ func (bt *badgerTxn) Scan(prefix []byte, opts ScanOptions) Iterator {
 	iter.Seek(prefix)
 
 	return &badgerIterator{
-		iter: iter,
-		ctx:  context.Background(),
+		iter:  iter,
+		txn:   nil, // Transaction is managed externally in this case
+		ctx:   context.Background(),
+		first: false,
 	}
 }
 

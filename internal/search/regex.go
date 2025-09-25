@@ -289,6 +289,11 @@ func (rs *RegexSearcher) searchFile(ctx context.Context, filePath string, patter
 
 	atomic.AddInt64(&rs.filesProcessed, 1)
 
+	// Use multiline search if specified
+	if opts.Multiline {
+		return rs.searchFileMultiline(file, filePath, pattern, opts, results)
+	}
+
 	if opts.Count || opts.FilesWithMatches || opts.FilesWithoutMatches {
 		return rs.searchFileCountOnly(file, filePath, pattern, opts, results)
 	}

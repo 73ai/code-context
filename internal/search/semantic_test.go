@@ -167,14 +167,18 @@ func TestSemanticSearcherDefinitionSearch(t *testing.T) {
 				t.Errorf("Expected struct symbol kind, got '%s'", result.SymbolKind)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Definition search error: %v", err)
 
 		case <-time.After(10 * time.Second):
 			t.Fatal("Definition search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -246,14 +250,18 @@ func main() {
 				t.Errorf("Expected symbol name 'TestType', got '%s'", result.SymbolName)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Reference search error: %v", err)
 
 		case <-time.After(10 * time.Second):
 			t.Fatal("Reference search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -299,14 +307,18 @@ func TestSemanticSearcherSymbolTypes(t *testing.T) {
 				t.Errorf("Expected function/method symbol, got '%s'", result.SymbolKind)
 			}
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Symbol type search error: %v", err)
 
 		case <-time.After(10 * time.Second):
 			t.Fatal("Symbol type search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -346,14 +358,18 @@ func TestSemanticSearcherCaseSensitive(t *testing.T) {
 			}
 			caseSensitiveCount++
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Case sensitive search error: %v", err)
 
 		case <-time.After(10 * time.Second):
 			t.Fatal("Case sensitive search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}
@@ -372,14 +388,18 @@ func TestSemanticSearcherCaseSensitive(t *testing.T) {
 			}
 			caseInsensitiveCount++
 
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				break
+			}
 			t.Fatalf("Case insensitive search error: %v", err)
 
 		case <-time.After(10 * time.Second):
 			t.Fatal("Case insensitive search timeout")
 		}
 
-		if results == nil {
+		if results == nil && errs == nil {
 			break
 		}
 	}

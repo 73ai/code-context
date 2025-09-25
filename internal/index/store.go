@@ -1,6 +1,7 @@
 package index
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -197,7 +198,14 @@ func (s *Store) GetAllFiles(ctx context.Context) ([]FileMetadata, error) {
 	iter := s.storage.Scan(ctx, []byte(PrefixFile), ScanOptions{})
 	defer iter.Close()
 
+	prefix := []byte(PrefixFile)
 	for iter.Next() {
+		key := iter.Key()
+		// Ensure the key actually starts with our prefix
+		if len(key) < len(prefix) || !bytes.Equal(key[:len(prefix)], prefix) {
+			break // No more keys with this prefix
+		}
+
 		var metadata FileMetadata
 		if err := UnmarshalValue(iter.Value(), &metadata); err != nil {
 			continue // Skip corrupted entries
@@ -366,6 +374,12 @@ func (s *Store) GetSymbolsInFile(ctx context.Context, filePath string) ([]Symbol
 	defer iter.Close()
 
 	for iter.Next() {
+		key := iter.Key()
+		// Ensure the key actually starts with our prefix
+		if len(key) < len(prefix) || !bytes.Equal(key[:len(prefix)], prefix) {
+			break // No more keys with this prefix
+		}
+
 		var symbol SymbolInfo
 		if err := UnmarshalValue(iter.Value(), &symbol); err != nil {
 			continue // Skip corrupted entries

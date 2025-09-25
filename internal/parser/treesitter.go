@@ -163,7 +163,8 @@ func (p *TreeSitterParser) ParseFile(filePath string, content []byte) (*ParseRes
 	// Parse the content
 	tree := parser.Parse(content, nil)
 	if tree == nil {
-		return nil, fmt.Errorf("failed to parse file")
+		// If tree-sitter parsing fails, fall back to basic parsing
+		return p.fallbackParse(filePath, content, config.Name)
 	}
 
 	result := &ParseResult{
@@ -253,6 +254,8 @@ func (p *TreeSitterParser) nodeToSymbol(node *sitter.Node, content []byte, fileP
 		return p.pythonNodeToSymbol(node, nodeType, content, filePath)
 	case "javascript":
 		return p.jsNodeToSymbol(node, nodeType, content, filePath)
+	case "typescript":
+		return p.typescriptNodeToSymbol(node, nodeType, content, filePath)
 	case "rust":
 		return p.rustNodeToSymbol(node, nodeType, content, filePath)
 	default:
@@ -264,6 +267,10 @@ func (p *TreeSitterParser) nodeToSymbol(node *sitter.Node, content []byte, fileP
 func (p *TreeSitterParser) goNodeToSymbol(node *sitter.Node, nodeType string, content []byte, filePath string) *Symbol {
 	switch nodeType {
 	case "function_declaration":
+		// Check if this is a method (has receiver)
+		if p.hasReceiver(node) {
+			return p.extractGoFunction(node, content, filePath, SymbolMethod)
+		}
 		return p.extractGoFunction(node, content, filePath, SymbolFunction)
 	case "method_declaration":
 		return p.extractGoFunction(node, content, filePath, SymbolMethod)
@@ -276,6 +283,52 @@ func (p *TreeSitterParser) goNodeToSymbol(node *sitter.Node, nodeType string, co
 	default:
 		return nil
 	}
+}
+
+// hasReceiver checks if a function declaration has a receiver (i.e., is a method)
+func (p *TreeSitterParser) hasReceiver(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+
+	// Look for parameter_list child
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child != nil && child.Kind() == "parameter_list" {
+			// Check if this parameter list has parentheses with a receiver
+			childText := p.getNodeText(child, nil)
+			// A method receiver will be like (ts *TestStruct) before the function name
+			if strings.Contains(childText, "*") || strings.Contains(childText, " ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// extractPrecedingComment looks for comment nodes that precede the given node
+func (p *TreeSitterParser) extractPrecedingComment(node *sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
+	}
+
+	// Get the line number of the current node
+	startLine := int(node.StartPosition().Row)
+
+	// Look through the content lines to find comments directly before this node
+	lines := strings.Split(string(content), "\n")
+
+	// Look for comments on the line immediately preceding the function
+	if startLine > 0 {
+		prevLine := lines[startLine-1]
+		prevLine = strings.TrimSpace(prevLine)
+		if strings.HasPrefix(prevLine, "//") {
+			comment := strings.TrimSpace(prevLine[2:])
+			return comment
+		}
+	}
+
+	return ""
 }
 
 // pythonNodeToSymbol converts Python-specific nodes to symbols
@@ -317,13 +370,26 @@ func (p *TreeSitterParser) rustNodeToSymbol(node *sitter.Node, nodeType string, 
 // Helper functions for extracting specific symbol types
 
 func (p *TreeSitterParser) extractGoFunction(node *sitter.Node, content []byte, filePath string, kind SymbolKind) *Symbol {
-	// Find the function name (identifier child)
+	// Find the function name
 	var nameNode *sitter.Node
-	for i := uint(0); i < node.ChildCount(); i++ {
-		child := node.Child(i)
-		if child != nil && child.Kind() == "identifier" {
-			nameNode = child
-			break
+
+	if kind == SymbolMethod {
+		// For methods, look for field_identifier (method name)
+		for i := uint(0); i < node.ChildCount(); i++ {
+			child := node.Child(i)
+			if child != nil && child.Kind() == "field_identifier" {
+				nameNode = child
+				break
+			}
+		}
+	} else {
+		// For regular functions, look for identifier
+		for i := uint(0); i < node.ChildCount(); i++ {
+			child := node.Child(i)
+			if child != nil && child.Kind() == "identifier" {
+				nameNode = child
+				break
+			}
 		}
 	}
 
@@ -338,6 +404,9 @@ func (p *TreeSitterParser) extractGoFunction(node *sitter.Node, content []byte, 
 
 	startPoint := node.StartPosition()
 	endPoint := node.EndPosition()
+
+	// Extract documentation comment (look for preceding comment)
+	docString := p.extractPrecedingComment(node, content)
 
 	return &Symbol{
 		Name:      name,
@@ -355,6 +424,7 @@ func (p *TreeSitterParser) extractGoFunction(node *sitter.Node, content []byte, 
 		EndLine:   int(endPoint.Row) + 1,
 		EndColumn: int(endPoint.Column) + 1,
 		Language:  "go",
+		DocString: docString,
 	}
 }
 
@@ -1218,4 +1288,536 @@ func ValidateTree(tree *sitter.Tree) []ParseError {
 
 	walk(rootNode)
 	return errors
+}
+
+// typescriptNodeToSymbol converts TypeScript-specific nodes to symbols
+func (p *TreeSitterParser) typescriptNodeToSymbol(node *sitter.Node, nodeType string, content []byte, filePath string) *Symbol {
+	switch nodeType {
+	case "function_declaration":
+		return p.extractTypescriptFunction(node, content, filePath)
+	case "class_declaration":
+		return p.extractTypescriptClass(node, content, filePath)
+	case "interface_declaration":
+		return p.extractTypescriptInterface(node, content, filePath)
+	case "type_alias_declaration":
+		return p.extractTypescriptType(node, content, filePath)
+	default:
+		return nil
+	}
+}
+
+func (p *TreeSitterParser) extractTypescriptFunction(node *sitter.Node, content []byte, filePath string) *Symbol {
+	var nameNode *sitter.Node
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child != nil && child.Kind() == "identifier" {
+			nameNode = child
+			break
+		}
+	}
+
+	if nameNode == nil {
+		return nil
+	}
+
+	name := p.getNodeText(nameNode, content)
+	if name == "" {
+		return nil
+	}
+
+	startPoint := node.StartPosition()
+	endPoint := node.EndPosition()
+
+	return &Symbol{
+		Name:      name,
+		Kind:      SymbolFunction,
+		Location: Location{
+			File:      filePath,
+			Line:      int(startPoint.Row) + 1,
+			Column:    int(startPoint.Column) + 1,
+			EndLine:   int(endPoint.Row) + 1,
+			EndColumn: int(endPoint.Column) + 1,
+		},
+		FilePath:  filePath,
+		Line:      int(startPoint.Row) + 1,
+		Column:    int(startPoint.Column) + 1,
+		EndLine:   int(endPoint.Row) + 1,
+		EndColumn: int(endPoint.Column) + 1,
+		Language:  "typescript",
+	}
+}
+
+func (p *TreeSitterParser) extractTypescriptClass(node *sitter.Node, content []byte, filePath string) *Symbol {
+	var nameNode *sitter.Node
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child != nil && (child.Kind() == "type_identifier" || child.Kind() == "identifier") {
+			nameNode = child
+			break
+		}
+	}
+
+	if nameNode == nil {
+		return nil
+	}
+
+	name := p.getNodeText(nameNode, content)
+	if name == "" {
+		return nil
+	}
+
+	startPoint := node.StartPosition()
+	endPoint := node.EndPosition()
+
+	return &Symbol{
+		Name:      name,
+		Kind:      SymbolClass,
+		Location: Location{
+			File:      filePath,
+			Line:      int(startPoint.Row) + 1,
+			Column:    int(startPoint.Column) + 1,
+			EndLine:   int(endPoint.Row) + 1,
+			EndColumn: int(endPoint.Column) + 1,
+		},
+		FilePath:  filePath,
+		Line:      int(startPoint.Row) + 1,
+		Column:    int(startPoint.Column) + 1,
+		EndLine:   int(endPoint.Row) + 1,
+		EndColumn: int(endPoint.Column) + 1,
+		Language:  "typescript",
+	}
+}
+
+func (p *TreeSitterParser) extractTypescriptInterface(node *sitter.Node, content []byte, filePath string) *Symbol {
+	var nameNode *sitter.Node
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child != nil && (child.Kind() == "type_identifier" || child.Kind() == "identifier") {
+			nameNode = child
+			break
+		}
+	}
+
+	if nameNode == nil {
+		return nil
+	}
+
+	name := p.getNodeText(nameNode, content)
+	if name == "" {
+		return nil
+	}
+
+	startPoint := node.StartPosition()
+	endPoint := node.EndPosition()
+
+	return &Symbol{
+		Name:      name,
+		Kind:      SymbolInterface,
+		Location: Location{
+			File:      filePath,
+			Line:      int(startPoint.Row) + 1,
+			Column:    int(startPoint.Column) + 1,
+			EndLine:   int(endPoint.Row) + 1,
+			EndColumn: int(endPoint.Column) + 1,
+		},
+		FilePath:  filePath,
+		Line:      int(startPoint.Row) + 1,
+		Column:    int(startPoint.Column) + 1,
+		EndLine:   int(endPoint.Row) + 1,
+		EndColumn: int(endPoint.Column) + 1,
+		Language:  "typescript",
+	}
+}
+
+func (p *TreeSitterParser) extractTypescriptType(node *sitter.Node, content []byte, filePath string) *Symbol {
+	var nameNode *sitter.Node
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child != nil && (child.Kind() == "type_identifier" || child.Kind() == "identifier") {
+			nameNode = child
+			break
+		}
+	}
+
+	if nameNode == nil {
+		return nil
+	}
+
+	name := p.getNodeText(nameNode, content)
+	if name == "" {
+		return nil
+	}
+
+	startPoint := node.StartPosition()
+	endPoint := node.EndPosition()
+
+	return &Symbol{
+		Name:      name,
+		Kind:      SymbolType,
+		Location: Location{
+			File:      filePath,
+			Line:      int(startPoint.Row) + 1,
+			Column:    int(startPoint.Column) + 1,
+			EndLine:   int(endPoint.Row) + 1,
+			EndColumn: int(endPoint.Column) + 1,
+		},
+		FilePath:  filePath,
+		Line:      int(startPoint.Row) + 1,
+		Column:    int(startPoint.Column) + 1,
+		EndLine:   int(endPoint.Row) + 1,
+		EndColumn: int(endPoint.Column) + 1,
+		Language:  "typescript",
+	}
+}
+
+// fallbackParse provides basic symbol extraction when tree-sitter parsing fails
+func (p *TreeSitterParser) fallbackParse(filePath string, content []byte, language string) (*ParseResult, error) {
+	result := &ParseResult{
+		Tree:     nil, // No tree available
+		Language: language,
+		FilePath: filePath,
+		Symbols:  make([]*Symbol, 0),
+	}
+
+	// Use regex-based fallback parsing
+	symbols := p.extractSymbolsWithRegex(content, filePath, language)
+	result.Symbols = symbols
+
+	return result, nil
+}
+
+// extractSymbolsWithRegex extracts basic symbols using regex patterns when tree-sitter fails
+func (p *TreeSitterParser) extractSymbolsWithRegex(content []byte, filePath, language string) []*Symbol {
+	var symbols []*Symbol
+	lines := strings.Split(string(content), "\n")
+
+	switch language {
+	case "typescript":
+		symbols = append(symbols, p.extractTypescriptSymbolsRegex(lines, filePath)...)
+	case "javascript":
+		symbols = append(symbols, p.extractJavascriptSymbolsRegex(lines, filePath)...)
+	case "go":
+		symbols = append(symbols, p.extractGoSymbolsRegex(lines, filePath)...)
+	case "python":
+		symbols = append(symbols, p.extractPythonSymbolsRegex(lines, filePath)...)
+	case "rust":
+		symbols = append(symbols, p.extractRustSymbolsRegex(lines, filePath)...)
+	}
+
+	return symbols
+}
+
+func (p *TreeSitterParser) extractTypescriptSymbolsRegex(lines []string, filePath string) []*Symbol {
+	var symbols []*Symbol
+
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Match interface declarations
+		if strings.HasPrefix(line, "interface ") || strings.Contains(line, "interface ") {
+			if parts := strings.Fields(line); len(parts) >= 2 {
+				for i, part := range parts {
+					if part == "interface" && i+1 < len(parts) {
+						name := strings.TrimSuffix(parts[i+1], "{")
+						name = strings.TrimSpace(name)
+						if name != "" {
+							symbols = append(symbols, &Symbol{
+								Name:      name,
+								Kind:      SymbolInterface,
+								FilePath:  filePath,
+								Line:      lineNum + 1,
+								Column:    1,
+								Language:  "typescript",
+								Location: Location{
+									File:   filePath,
+									Line:   lineNum + 1,
+									Column: 1,
+								},
+							})
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// Match type declarations
+		if strings.HasPrefix(line, "type ") || strings.Contains(line, "type ") {
+			if parts := strings.Fields(line); len(parts) >= 2 {
+				for i, part := range parts {
+					if part == "type" && i+1 < len(parts) {
+						name := strings.Split(parts[i+1], "=")[0]
+						name = strings.TrimSpace(name)
+						if name != "" {
+							symbols = append(symbols, &Symbol{
+								Name:      name,
+								Kind:      SymbolType,
+								FilePath:  filePath,
+								Line:      lineNum + 1,
+								Column:    1,
+								Language:  "typescript",
+								Location: Location{
+									File:   filePath,
+									Line:   lineNum + 1,
+									Column: 1,
+								},
+							})
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// Match class declarations
+		if strings.HasPrefix(line, "class ") || strings.Contains(line, "class ") {
+			if parts := strings.Fields(line); len(parts) >= 2 {
+				for i, part := range parts {
+					if part == "class" && i+1 < len(parts) {
+						name := strings.TrimSuffix(parts[i+1], "{")
+						name = strings.Split(name, " ")[0] // Handle "class Name extends" case
+						name = strings.TrimSpace(name)
+						if name != "" {
+							symbols = append(symbols, &Symbol{
+								Name:      name,
+								Kind:      SymbolClass,
+								FilePath:  filePath,
+								Line:      lineNum + 1,
+								Column:    1,
+								Language:  "typescript",
+								Location: Location{
+									File:   filePath,
+									Line:   lineNum + 1,
+									Column: 1,
+								},
+							})
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// Match function declarations (including methods)
+		if strings.Contains(line, "function ") || (strings.Contains(line, "(") && strings.Contains(line, ")") && strings.Contains(line, "{")) {
+			if strings.Contains(line, "function ") {
+				if parts := strings.Fields(line); len(parts) >= 2 {
+					for i, part := range parts {
+						if part == "function" && i+1 < len(parts) {
+							name := strings.Split(parts[i+1], "(")[0]
+							name = strings.TrimSpace(name)
+							if name != "" {
+								symbols = append(symbols, &Symbol{
+									Name:      name,
+									Kind:      SymbolFunction,
+									FilePath:  filePath,
+									Line:      lineNum + 1,
+									Column:    1,
+									Language:  "typescript",
+									Location: Location{
+										File:   filePath,
+										Line:   lineNum + 1,
+										Column: 1,
+									},
+								})
+							}
+							break
+						}
+					}
+				}
+			} else if strings.Contains(line, "(") && strings.Contains(line, ")") && !strings.HasPrefix(line, "//") {
+				// Match method-like patterns: name(...) { or name(...): type {
+				parenIndex := strings.Index(line, "(")
+				if parenIndex > 0 {
+					beforeParen := line[:parenIndex]
+					// Extract potential method name
+					words := strings.Fields(beforeParen)
+					if len(words) > 0 {
+						lastWord := words[len(words)-1]
+						// Skip common keywords
+						if lastWord != "if" && lastWord != "while" && lastWord != "for" && lastWord != "catch" && lastWord != "switch" {
+							symbols = append(symbols, &Symbol{
+								Name:      lastWord,
+								Kind:      SymbolMethod,
+								FilePath:  filePath,
+								Line:      lineNum + 1,
+								Column:    1,
+								Language:  "typescript",
+								Location: Location{
+									File:   filePath,
+									Line:   lineNum + 1,
+									Column: 1,
+								},
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return symbols
+}
+
+// Add basic regex fallbacks for other languages as well
+func (p *TreeSitterParser) extractJavascriptSymbolsRegex(lines []string, filePath string) []*Symbol {
+	// Similar to TypeScript but without types and interfaces
+	var symbols []*Symbol
+	// Basic implementation - can be expanded
+	return symbols
+}
+
+func (p *TreeSitterParser) extractGoSymbolsRegex(lines []string, filePath string) []*Symbol {
+	var symbols []*Symbol
+
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Match function declarations
+		if strings.HasPrefix(line, "func ") {
+			// Check if it's a method (has receiver): func (receiver) methodName
+			if strings.HasPrefix(line, "func (") {
+				// Method declaration - find the method name after the receiver
+				receiverEnd := strings.Index(line, ") ")
+				if receiverEnd > 0 {
+					afterReceiver := strings.TrimSpace(line[receiverEnd+2:])
+					if methodParts := strings.Fields(afterReceiver); len(methodParts) > 0 {
+						methodName := strings.Split(methodParts[0], "(")[0]
+						if methodName != "" {
+							// Extract docstring from previous lines
+							docString := p.extractDocString(lines, lineNum)
+							symbols = append(symbols, &Symbol{
+								Name:      methodName,
+								Kind:      SymbolMethod,
+								FilePath:  filePath,
+								Line:      lineNum + 1,
+								Column:    1,
+								Language:  "go",
+								DocString: docString,
+							})
+						}
+					}
+				}
+			} else if parts := strings.Fields(line); len(parts) >= 2 {
+				// Regular function declaration
+				funcName := strings.Split(parts[1], "(")[0]
+				if funcName != "" {
+					// Extract docstring from previous lines
+					docString := p.extractDocString(lines, lineNum)
+					symbols = append(symbols, &Symbol{
+						Name:      funcName,
+						Kind:      SymbolFunction,
+						FilePath:  filePath,
+						Line:      lineNum + 1,
+						Column:    1,
+						Language:  "go",
+						DocString: docString,
+					})
+				}
+			}
+		}
+
+		// Match type declarations
+		if strings.HasPrefix(line, "type ") {
+			if parts := strings.Fields(line); len(parts) >= 3 {
+				typeName := parts[1]
+				typeKind := parts[2]
+				var symbolKind SymbolKind = SymbolType
+
+				if typeKind == "struct" || strings.Contains(typeKind, "struct") {
+					symbolKind = SymbolStruct
+				} else if typeKind == "interface" || strings.Contains(typeKind, "interface") {
+					symbolKind = SymbolInterface
+				}
+
+				if typeName != "" {
+					// Extract docstring from previous lines
+					docString := p.extractDocString(lines, lineNum)
+					symbols = append(symbols, &Symbol{
+						Name:      typeName,
+						Kind:      symbolKind,
+						FilePath:  filePath,
+						Line:      lineNum + 1,
+						Column:    1,
+						Language:  "go",
+						DocString: docString,
+					})
+				}
+			}
+		}
+
+		// Match variable declarations
+		if strings.HasPrefix(line, "var ") {
+			if parts := strings.Fields(line); len(parts) >= 2 {
+				varName := parts[1]
+				if varName != "" && !strings.Contains(varName, "(") {
+					symbols = append(symbols, &Symbol{
+						Name:      varName,
+						Kind:      SymbolVariable,
+						FilePath:  filePath,
+						Line:      lineNum + 1,
+						Column:    1,
+						Language:  "go",
+					})
+				}
+			}
+		}
+
+		// Match constant declarations
+		if strings.HasPrefix(line, "const ") {
+			if parts := strings.Fields(line); len(parts) >= 2 {
+				constName := parts[1]
+				if constName != "" {
+					symbols = append(symbols, &Symbol{
+						Name:      constName,
+						Kind:      SymbolConstant,
+						FilePath:  filePath,
+						Line:      lineNum + 1,
+						Column:    1,
+						Language:  "go",
+					})
+				}
+			}
+		}
+	}
+
+	return symbols
+}
+
+// extractDocString extracts documentation from the lines preceding a symbol
+func (p *TreeSitterParser) extractDocString(lines []string, lineNum int) string {
+	var docLines []string
+
+	// Look backwards from the symbol line for comments
+	for i := lineNum - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "//") {
+			// Add the comment without the // prefix
+			comment := strings.TrimSpace(strings.TrimPrefix(line, "//"))
+			docLines = append([]string{comment}, docLines...) // prepend
+		} else if line == "" {
+			// Skip empty lines
+			continue
+		} else {
+			// Stop when we hit a non-comment, non-empty line
+			break
+		}
+	}
+
+	if len(docLines) > 0 {
+		return strings.Join(docLines, " ")
+	}
+	return ""
+}
+
+func (p *TreeSitterParser) extractPythonSymbolsRegex(lines []string, filePath string) []*Symbol {
+	var symbols []*Symbol
+	// Basic implementation - can be expanded
+	return symbols
+}
+
+func (p *TreeSitterParser) extractRustSymbolsRegex(lines []string, filePath string) []*Symbol {
+	var symbols []*Symbol
+	// Basic implementation - can be expanded
+	return symbols
 }
