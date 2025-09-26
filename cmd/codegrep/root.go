@@ -12,7 +12,6 @@ import (
 )
 
 var (
-	// Version information
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
@@ -130,7 +129,6 @@ EXAMPLES:
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Basic search flags
 	rootCmd.Flags().BoolVarP(&config.IgnoreCase, "ignore-case", "i", false, "Case insensitive search")
 	rootCmd.Flags().BoolVarP(&config.LineNumber, "line-number", "n", false, "Show line numbers")
 	rootCmd.Flags().BoolVarP(&config.WithFilename, "with-filename", "H", false, "Show file names")
@@ -138,25 +136,21 @@ func init() {
 	rootCmd.Flags().BoolVarP(&config.Count, "count", "c", false, "Show count of matches per file")
 	rootCmd.Flags().BoolVarP(&config.OnlyMatching, "only-matching", "o", false, "Show only matching parts")
 
-	// Context flags
 	rootCmd.Flags().IntVarP(&config.ContextAfter, "after-context", "A", 0, "Show NUM lines after each match")
 	rootCmd.Flags().IntVarP(&config.ContextBefore, "before-context", "B", 0, "Show NUM lines before each match")
 	rootCmd.Flags().IntVarP(&config.Context, "context", "C", 0, "Show NUM lines before and after each match")
 
-	// File type filtering
 	rootCmd.Flags().StringSliceVarP(&config.Type, "type", "t", nil, "Search only files matching TYPE")
 	rootCmd.Flags().StringSliceVarP(&config.TypeNot, "type-not", "T", nil, "Do not search files matching TYPE")
 	rootCmd.Flags().StringSliceVarP(&config.Glob, "glob", "g", nil, "Include files matching GLOB")
 	rootCmd.Flags().StringSliceVar(&config.GlobNot, "iglob", nil, "Exclude files matching GLOB")
 
-	// Output control
 	rootCmd.Flags().BoolVar(&config.JSON, "json", false, "Output results in JSON format")
 	rootCmd.Flags().StringVar(&config.Color, "color", "auto", "When to use colors (never, auto, always)")
 	rootCmd.Flags().BoolVar(&config.NoHeading, "no-heading", false, "Don't print file names")
 	rootCmd.Flags().BoolVarP(&config.NullSep, "null", "0", false, "Use null separator")
 	rootCmd.Flags().StringVar(&config.PathSep, "path-separator", "/", "Path separator to use")
 
-	// Search behavior
 	rootCmd.Flags().BoolVarP(&config.WordRegexp, "word-regexp", "w", false, "Only match whole words")
 	rootCmd.Flags().BoolVarP(&config.LineRegexp, "line-regexp", "x", false, "Only match whole lines")
 	rootCmd.Flags().BoolVarP(&config.FixedStrings, "fixed-strings", "F", false, "Treat pattern as literal string")
@@ -164,38 +158,32 @@ func init() {
 	rootCmd.Flags().BoolVarP(&config.Multiline, "multiline", "U", false, "Enable multiline mode")
 	rootCmd.Flags().BoolVar(&config.DotMatchesAll, "multiline-dotall", false, "Allow . to match newlines")
 
-	// Performance and limits
 	rootCmd.Flags().IntVarP(&config.MaxCount, "max-count", "m", 0, "Limit matches per file")
 	rootCmd.Flags().IntVar(&config.MaxDepth, "max-depth", 0, "Limit directory traversal depth")
 	rootCmd.Flags().IntVar(&config.MaxFilesize, "max-filesize", 0, "Skip files larger than SIZE bytes")
 	rootCmd.Flags().IntVarP(&config.Threads, "threads", "j", 0, "Number of threads to use (0 = auto)")
 
-	// Hidden files and ignore patterns
 	rootCmd.Flags().BoolVar(&config.Hidden, "hidden", false, "Search hidden files and directories")
 	rootCmd.Flags().BoolVar(&config.NoIgnore, "no-ignore", false, "Don't respect ignore files")
 	rootCmd.Flags().BoolVar(&config.NoGlobal, "no-ignore-global", false, "Don't respect global ignore files")
 	rootCmd.Flags().BoolVar(&config.NoParent, "no-ignore-parent", false, "Don't respect parent ignore files")
 	rootCmd.Flags().BoolVar(&config.NoVcs, "no-ignore-vcs", false, "Don't respect VCS ignore files")
 
-	// Other options
 	rootCmd.Flags().BoolVarP(&config.Invert, "invert-match", "v", false, "Invert matching")
 	rootCmd.Flags().BoolVarP(&config.Quiet, "quiet", "q", false, "Suppress normal output")
 	rootCmd.Flags().BoolVarP(&config.Binary, "binary", "a", false, "Search binary files")
 	rootCmd.Flags().StringVarP(&config.Replace, "replace", "r", "", "Replace matches with string")
 	rootCmd.Flags().StringVarP(&config.Encoding, "encoding", "E", "auto", "Text encoding to use")
 
-	// NEW: Semantic search flags
 	rootCmd.Flags().BoolVar(&config.Symbols, "symbols", false, "Find symbol definitions")
 	rootCmd.Flags().BoolVar(&config.Refs, "refs", false, "Find symbol references")
 	rootCmd.Flags().BoolVar(&config.Types, "types", false, "Find type definitions")
 	rootCmd.Flags().BoolVar(&config.CallGraph, "call-graph", false, "Show call graph relationships")
 
-	// Index management
 	rootCmd.Flags().BoolVar(&config.NoIndex, "no-index", false, "Disable index usage for semantic search")
 	rootCmd.Flags().StringVar(&config.IndexPath, "index-path", "", "Custom index location")
 	rootCmd.Flags().BoolVar(&config.RebuildIndex, "rebuild-index", false, "Force rebuild of semantic index")
 
-	// Bind flags to viper for configuration file support
 	viper.BindPFlags(rootCmd.Flags())
 }
 
@@ -281,7 +269,6 @@ func validateSemanticFlags() error {
 	return nil
 }
 
-// Interfaces implemented in other files
 type SearchEngine interface {
 	Search(ctx context.Context, config *Config) (*SearchResults, error)
 	Close() error

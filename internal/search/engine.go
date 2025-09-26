@@ -20,12 +20,10 @@ const (
 
 // SearchOptions defines configuration for search operations
 type SearchOptions struct {
-	// Core search configuration
 	Pattern     string
 	SearchPaths []string
 	SearchMode  SearchMode
 
-	// Regex options (ripgrep compatible)
 	CaseSensitive    bool
 	WholeWord        bool
 	InvertMatch      bool
@@ -34,33 +32,27 @@ type SearchOptions struct {
 	FilesWithMatches bool
 	FilesWithoutMatches bool
 
-	// Context options
 	ContextBefore int
 	ContextAfter  int
 	Context       int
 
-	// Multiline options
 	Multiline    bool
 	DotMatchAll  bool
 
-	// File filtering
 	FileTypes    []string
 	Globs        []string
 	ExcludeGlobs []string
 
-	// Performance options
 	MaxWorkers   int
 	MaxFileSize  int64
 	Timeout      time.Duration
 
-	// Output options
 	LineNumbers  bool
 	WithFilename bool
 	NoHeading    bool
 	JSON         bool
 	OutputPath   string
 
-	// Semantic options
 	SymbolTypes  []string
 	FindRefs     bool
 	FindDefs     bool
@@ -79,7 +71,6 @@ type SearchResult struct {
 	Context     []string          `json:"context,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 
-	// Semantic-specific fields
 	SymbolName  string `json:"symbol_name,omitempty"`
 	SymbolType  string `json:"symbol_type,omitempty"`
 	SymbolKind  string `json:"symbol_kind,omitempty"`
@@ -110,20 +101,16 @@ type Engine struct {
 	regexSearcher    Searcher
 	semanticSearcher Searcher
 
-	// Performance monitoring
 	stats      SearchStats
 	statsMutex sync.RWMutex
 }
 
-// NewEngine creates a new search engine with the specified configuration
 func NewEngine() (*Engine, error) {
-	// Initialize regex searcher
 	regexSearcher, err := NewRegexSearcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize regex searcher: %w", err)
 	}
 
-	// Initialize semantic searcher
 	semanticSearcher, err := NewSemanticSearcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize semantic searcher: %w", err)
@@ -136,11 +123,9 @@ func NewEngine() (*Engine, error) {
 	}, nil
 }
 
-// Search performs a search operation based on the provided options
 func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writer) error {
 	startTime := time.Now()
 
-	// Set default options
 	if opts.MaxWorkers == 0 {
 		opts.MaxWorkers = runtime.NumCPU()
 	}
@@ -151,11 +136,9 @@ func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writ
 		opts.Timeout = 30 * time.Second
 	}
 
-	// Create context with timeout
 	searchCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	// Reset stats
 	e.statsMutex.Lock()
 	e.stats = SearchStats{}
 	e.statsMutex.Unlock()
@@ -172,10 +155,8 @@ func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writ
 		return fmt.Errorf("unsupported search mode: %v", opts.SearchMode)
 	}
 
-	// Start the search
 	results, errs := searcher.Search(searchCtx, opts)
 
-	// Process results
 	formatter := NewFormatter(opts, output)
 	defer formatter.Close()
 
@@ -214,7 +195,6 @@ func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writ
 		}
 	}
 
-	// Update final stats
 	searcherStats := searcher.Stats()
 	e.statsMutex.Lock()
 	e.stats = searcherStats
@@ -222,7 +202,6 @@ func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writ
 	e.stats.SearchDuration = time.Since(startTime)
 	e.statsMutex.Unlock()
 
-	// Format final stats if requested
 	if opts.JSON {
 		if err := formatter.FormatStats(&e.stats); err != nil {
 			return fmt.Errorf("failed to format stats: %w", err)
@@ -232,21 +211,17 @@ func (e *Engine) Search(ctx context.Context, opts *SearchOptions, output io.Writ
 	return searchErr
 }
 
-// searchHybrid performs a hybrid search using both regex and semantic searchers
 func (e *Engine) searchHybrid(ctx context.Context, opts *SearchOptions, output io.Writer) error {
-	// First, perform regex search for fast results
 	regexOpts := *opts
 	regexOpts.SearchMode = ModeRegex
 
 	regexResults, regexErrs := e.regexSearcher.Search(ctx, &regexOpts)
 
-	// Then, perform semantic search for enhanced results
 	semanticOpts := *opts
 	semanticOpts.SearchMode = ModeSemantic
 
 	semanticResults, semanticErrs := e.semanticSearcher.Search(ctx, &semanticOpts)
 
-	// Merge and deduplicate results
 	formatter := NewFormatter(opts, output)
 	defer formatter.Close()
 
@@ -313,7 +288,6 @@ func (e *Engine) searchHybrid(ctx context.Context, opts *SearchOptions, output i
 		}
 	}
 
-	// Merge stats from both searchers
 	regexStats := e.regexSearcher.Stats()
 	semanticStats := e.semanticSearcher.Stats()
 
@@ -333,14 +307,12 @@ func (e *Engine) searchHybrid(ctx context.Context, opts *SearchOptions, output i
 	return searchErr
 }
 
-// Stats returns current search statistics
 func (e *Engine) Stats() SearchStats {
 	e.statsMutex.RLock()
 	defer e.statsMutex.RUnlock()
 	return e.stats
 }
 
-// Close cleans up resources used by the engine
 func (e *Engine) Close() error {
 	var errs []error
 
@@ -363,7 +335,6 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// Utility functions
 func maxInt64(a, b int64) int64 {
 	if a > b {
 		return a

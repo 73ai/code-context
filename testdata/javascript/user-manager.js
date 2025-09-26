@@ -198,23 +198,19 @@ export class UserManager extends EventEmitter {
         this.currentSession = null;
         this.isInitialized = false;
 
-        // Session management
         this.sessionCheckInterval = null;
         this.sessionWarningShown = false;
 
-        // User cache
         this.userCache = new Map();
-        this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
+        this.cacheTimeout = 5 * 60 * 1000;
     }
 
     async initialize() {
         if (this.isInitialized) return;
 
         try {
-            // Try to restore existing session
             await this.restoreSession();
 
-            // Setup session monitoring
             this.startSessionMonitoring();
 
             this.isInitialized = true;
@@ -232,7 +228,6 @@ export class UserManager extends EventEmitter {
             if (sessionData) {
                 session = AuthSession.fromJSON(sessionData);
             } else {
-                // Try to load from storage
                 const storedSession = await this.dataStore.get('user-session');
                 if (storedSession) {
                     session = AuthSession.fromJSON(storedSession);
@@ -240,7 +235,6 @@ export class UserManager extends EventEmitter {
             }
 
             if (session && session.isValid()) {
-                // Verify session with server
                 const isValidRemotely = await this.verifySessionWithServer(session);
 
                 if (isValidRemotely) {
@@ -255,7 +249,6 @@ export class UserManager extends EventEmitter {
 
                     return true;
                 } else {
-                    // Session invalid remotely, clear it
                     await this.clearSession();
                 }
             }
@@ -286,13 +279,11 @@ export class UserManager extends EventEmitter {
         try {
             this.emit('login-start', credentials);
 
-            // Validate credentials
             const validationErrors = this.validateCredentials(credentials);
             if (validationErrors.length > 0) {
                 throw new Error(validationErrors.join(', '));
             }
 
-            // Attempt login
             const response = await this.apiClient.post('/auth/login', credentials);
 
             if (response.ok && response.data) {
@@ -329,14 +320,12 @@ export class UserManager extends EventEmitter {
         try {
             this.emit('logout-start');
 
-            // Notify server
             if (this.currentSession?.token) {
                 try {
                     await this.apiClient.post('/auth/logout', {
                         token: this.currentSession.token
                     });
                 } catch (error) {
-                    // Log error but don't prevent logout
                     console.warn('Failed to notify server of logout:', error);
                 }
             }
@@ -356,7 +345,6 @@ export class UserManager extends EventEmitter {
         try {
             this.emit('register-start', userData);
 
-            // Validate user data
             const validationErrors = this.validateRegistrationData(userData);
             if (validationErrors.length > 0) {
                 throw new Error(validationErrors.join(', '));
@@ -510,7 +498,6 @@ export class UserManager extends EventEmitter {
             if (response.ok && response.data) {
                 const user = new User(response.data.user);
 
-                // Cache the user
                 this.userCache.set(userId, {
                     user,
                     timestamp: Date.now()
@@ -533,7 +520,6 @@ export class UserManager extends EventEmitter {
         await this.saveSession();
         this.setupAuthHeaders();
 
-        // Update user activity
         session.updateActivity();
     }
 
@@ -568,7 +554,6 @@ export class UserManager extends EventEmitter {
     }
 
     startSessionMonitoring() {
-        // Check session every minute
         this.sessionCheckInterval = setInterval(() => {
             this.checkSessionStatus();
         }, 60 * 1000);
@@ -590,7 +575,6 @@ export class UserManager extends EventEmitter {
             });
         }
 
-        // Try to refresh if expiring soon
         if (this.currentSession.isExpiringSoon(5) && this.currentSession.refreshToken) {
             try {
                 await this.refreshSession();
@@ -650,7 +634,6 @@ export class UserManager extends EventEmitter {
         return errors;
     }
 
-    // Getters and utility methods
     isAuthenticated() {
         return this.currentSession?.isValid() && this.currentUser !== null;
     }
@@ -698,11 +681,9 @@ export class UserManager extends EventEmitter {
     }
 }
 
-// Factory function
 export function createUserManager(apiClient, dataStore) {
     return new UserManager(apiClient, dataStore);
 }
 
-// Export classes
 export { User, AuthSession, UserManager };
 export default UserManager;

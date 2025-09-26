@@ -41,18 +41,15 @@ export class LogEntry {
         this.data = data;
         this.context = { ...context };
 
-        // Add stack trace for errors
         if (level === LogLevel.ERROR && data instanceof Error) {
             this.stack = data.stack;
         }
 
-        // Browser-specific context
         if (typeof window !== 'undefined') {
             this.context.userAgent = navigator.userAgent;
             this.context.url = window.location.href;
         }
 
-        // Node.js-specific context
         if (typeof process !== 'undefined') {
             this.context.pid = process.pid;
             this.context.platform = process.platform;
@@ -143,10 +140,10 @@ export class ConsoleOutput extends LogOutput {
         });
 
         this.colors = {
-            [LogLevel.DEBUG]: '\x1b[36m',  // Cyan
-            [LogLevel.INFO]: '\x1b[32m',   // Green
-            [LogLevel.WARN]: '\x1b[33m',   // Yellow
-            [LogLevel.ERROR]: '\x1b[31m'   // Red
+            [LogLevel.DEBUG]: '\x1b[36m',
+            [LogLevel.INFO]: '\x1b[32m',
+            [LogLevel.WARN]: '\x1b[33m',
+            [LogLevel.ERROR]: '\x1b[31m'
         };
 
         this.resetColor = '\x1b[0m';
@@ -179,7 +176,6 @@ export class ConsoleOutput extends LogOutput {
 
         const formatted = this.format(entry);
 
-        // Use appropriate console method based on level
         switch (entry.level) {
             case LogLevel.DEBUG:
                 console.debug(formatted);
@@ -221,7 +217,6 @@ export class BufferOutput extends LogOutput {
 
         this.buffer.push(entry);
 
-        // Maintain buffer size
         if (this.buffer.length > this.options.maxSize) {
             this.buffer.shift();
         }
@@ -364,7 +359,6 @@ export class Logger {
             ...options
         };
 
-        // Default console output if none specified
         if (this.options.outputs.length === 0) {
             this.options.outputs.push(new ConsoleOutput({
                 minLevel: this.options.level
@@ -378,7 +372,6 @@ export class Logger {
     setLevel(level) {
         this.options.level = level;
 
-        // Update all outputs to use new level if they don't have their own
         this.options.outputs.forEach(output => {
             if (!output.options.hasOwnProperty('minLevel')) {
                 output.options.minLevel = level;
@@ -413,7 +406,6 @@ export class Logger {
             ...additionalContext
         });
 
-        // Write to all outputs
         const writePromises = this.options.outputs.map(output =>
             output.write(entry).catch(error =>
                 console.error('Error writing to log output:', error)
@@ -439,7 +431,6 @@ export class Logger {
         return this.log(LogLevel.ERROR, message, data, context);
     }
 
-    // Performance monitoring methods
     time(name) {
         if (!this.options.enablePerformanceTracking) return null;
 
@@ -468,7 +459,6 @@ export class Logger {
         return result;
     }
 
-    // Utility methods for common logging patterns
     async logApiRequest(method, url, duration, status) {
         const level = status >= 400 ? LogLevel.ERROR : LogLevel.INFO;
         await this.log(level, `API Request: ${method} ${url}`, {
@@ -498,7 +488,6 @@ export class Logger {
         await this.error('Error occurred', errorData);
     }
 
-    // Batch logging for high-volume scenarios
     createBatchLogger(flushInterval = 1000) {
         const pendingLogs = [];
         let flushTimer = null;
@@ -536,7 +525,6 @@ export class Logger {
         };
     }
 
-    // Child logger with inherited context
     createChild(childContext = {}) {
         return new Logger({
             ...this.options,
@@ -545,7 +533,6 @@ export class Logger {
     }
 }
 
-// Factory functions
 export function createLogger(options = {}) {
     return new Logger(options);
 }
@@ -566,10 +553,8 @@ export function createBufferedLogger(maxSize = 1000) {
     });
 }
 
-// Global logger instance
 export const logger = createConsoleLogger();
 
-// Export all classes and utilities
 export {
     Logger,
     LogEntry,

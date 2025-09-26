@@ -13,7 +13,6 @@ type Formatter struct {
 	writer io.Writer
 }
 
-// NewFormatter creates a new formatter instance
 func NewFormatter(opts *SearchOptions, writer io.Writer) *Formatter {
 	return &Formatter{
 		opts:   opts,
@@ -21,7 +20,6 @@ func NewFormatter(opts *SearchOptions, writer io.Writer) *Formatter {
 	}
 }
 
-// FormatResult formats and outputs a single search result
 func (f *Formatter) FormatResult(result *SearchResult) error {
 	if f.opts.JSON {
 		return f.formatJSON(result)

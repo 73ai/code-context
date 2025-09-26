@@ -95,7 +95,6 @@ export class StringUtils {
             return div.innerHTML;
         }
 
-        // Fallback for Node.js
         return str
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -215,7 +214,6 @@ export class ValidationUtils {
         const feedback = [];
         let score = 0;
 
-        // Length check
         if (password.length < 8) {
             feedback.push('Password must be at least 8 characters long');
         } else {
@@ -223,7 +221,6 @@ export class ValidationUtils {
             if (password.length >= 12) score += 1;
         }
 
-        // Character variety checks
         if (!/[a-z]/.test(password)) {
             feedback.push('Password must contain lowercase letters');
         } else {
@@ -248,7 +245,6 @@ export class ValidationUtils {
             score += 1;
         }
 
-        // Common patterns
         if (/(.)\1{2,}/.test(password)) {
             feedback.push('Avoid repeating characters');
             score -= 1;
@@ -274,7 +270,7 @@ export class ValidationUtils {
 
         return input
             .trim()
-            .replace(/[<>]/g, '') // Remove potential HTML tags
+            .replace(/[<>]/g, '')
             .substring(0, maxLength);
     }
 }
@@ -372,7 +368,7 @@ export class DateUtils {
     static isWeekend(date) {
         if (!(date instanceof Date)) return false;
         const day = date.getDay();
-        return day === 0 || day === 6; // Sunday or Saturday
+        return day === 0 || day === 6;
     }
 
     /**
@@ -837,7 +833,6 @@ export class UrlUtils {
     }
 }
 
-// DOM utilities (browser only)
 export class DomUtils {
     /**
      * Check if element is in viewport
@@ -876,7 +871,6 @@ export class DomUtils {
     }
 }
 
-// Aggregate utils class
 export class Utils {
     static String = StringUtils;
     static Validation = ValidationUtils;
@@ -889,5 +883,4 @@ export class Utils {
     static Dom = DomUtils;
 }
 
-// Default export
 export default Utils;

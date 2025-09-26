@@ -94,7 +94,6 @@ class ModelMeta(type):
     """Metaclass for model classes."""
 
     def __new__(mcs, name, bases, attrs):
-        # Collect fields from class attributes
         fields = {}
         for key, value in list(attrs.items()):
             if isinstance(value, Field):
@@ -435,7 +434,6 @@ class OrderItem(BaseModel):
     created_at = Field(datetime, default=datetime.now)
 
     def __init__(self, **kwargs):
-        # Calculate line total if not provided
         if 'line_total' not in kwargs and 'quantity' in kwargs and 'unit_price' in kwargs:
             kwargs['line_total'] = Decimal(str(kwargs['quantity'])) * kwargs['unit_price']
         super().__init__(**kwargs)

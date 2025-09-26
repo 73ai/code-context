@@ -13,32 +13,25 @@ import (
 // It provides key-value storage with prefix scanning, transactions, and batch operations
 // optimized for storing code symbols, metadata, and query results.
 type Storage interface {
-	// Basic key-value operations
 	Get(ctx context.Context, key []byte) ([]byte, error)
 	Set(ctx context.Context, key, value []byte) error
 	Delete(ctx context.Context, key []byte) error
 	Has(ctx context.Context, key []byte) (bool, error)
 
-	// Batch operations for efficient bulk writes
 	Batch() Batch
 	WriteBatch(ctx context.Context, batch Batch) error
 
-	// Prefix scanning for range queries
 	Scan(ctx context.Context, prefix []byte, opts ScanOptions) Iterator
 
-	// Transactions for atomic multi-operation updates
 	Transaction(ctx context.Context, fn func(Txn) error) error
 
-	// Database management
 	Backup(ctx context.Context, w io.Writer) error
 	Restore(ctx context.Context, r io.Reader) error
 	Close() error
 
-	// Statistics and monitoring
 	Stats() StorageStats
 	Size() (int64, error)
 
-	// Maintenance operations
 	GC(ctx context.Context) error
 	Compact(ctx context.Context) error
 }
@@ -71,61 +64,47 @@ type Iterator interface {
 
 // ScanOptions controls prefix scanning behavior
 type ScanOptions struct {
-	// Reverse iterates in reverse order
 	Reverse bool
 
-	// Limit restricts the number of results (0 = no limit)
 	Limit int
 
-	// KeysOnly returns only keys, not values (more efficient)
 	KeysOnly bool
 
-	// StartAfter begins iteration after this key
 	StartAfter []byte
 }
 
 // StorageStats provides insights into storage performance and usage
 type StorageStats struct {
-	// Size metrics
 	TotalSize     int64 `json:"total_size"`
 	KeyCount      int64 `json:"key_count"`
 	IndexSize     int64 `json:"index_size"`
 
-	// Performance metrics
 	ReadCount     int64 `json:"read_count"`
 	WriteCount    int64 `json:"write_count"`
 	ScanCount     int64 `json:"scan_count"`
 
-	// Cache metrics
 	CacheHits     int64 `json:"cache_hits"`
 	CacheMisses   int64 `json:"cache_misses"`
 
-	// Timing metrics (in nanoseconds)
 	AvgReadTime   int64 `json:"avg_read_time"`
 	AvgWriteTime  int64 `json:"avg_write_time"`
 	AvgScanTime   int64 `json:"avg_scan_time"`
 
-	// Last update timestamp
 	LastUpdated   time.Time `json:"last_updated"`
 }
 
-// Key prefixes for different data types stored in the database
 const (
-	// Symbol storage prefixes
 	PrefixSymbol     = "sym:"  // sym:{file_hash}:{symbol_id} -> SymbolInfo
 	PrefixFile       = "file:" // file:{file_path_hash} -> FileMetadata
 	PrefixRef        = "ref:"  // ref:{symbol_hash}:{file_hash}:{line} -> Reference
 
-	// Index prefixes
 	PrefixName       = "name:" // name:{symbol_name} -> []symbol_id
 	PrefixType       = "type:" // type:{type_name} -> []symbol_id
 	PrefixTag        = "tag:"  // tag:{tag_name} -> []symbol_id
 
-	// Cache prefixes
 	PrefixQuery      = "query:" // query:{query_hash} -> QueryResult
 	PrefixStats      = "stats:" // stats:{timestamp} -> SearchStats
 
-	// Metadata prefixes
 	PrefixConfig     = "config:" // config:key -> value
 	PrefixVersion    = "version" // version -> schema_version
 	PrefixTimestamp  = "ts:"     // ts:last_update -> timestamp
@@ -183,7 +162,6 @@ type QueryResult struct {
 	ExpiresAt time.Time     `json:"expires_at"`
 }
 
-// Helper functions for key construction
 func SymbolKey(fileHash, symbolID string) []byte {
 	return []byte(PrefixSymbol + fileHash + ":" + symbolID)
 }
@@ -216,7 +194,6 @@ func ConfigKey(key string) []byte {
 	return []byte(PrefixConfig + key)
 }
 
-// JSON marshaling helpers for storage values
 func MarshalValue(v interface{}) ([]byte, error) {
 	return json.Marshal(v)
 }
@@ -240,7 +217,6 @@ func (e *StorageError) Unwrap() error {
 	return e.Err
 }
 
-// Common storage errors
 var (
 	ErrKeyNotFound   = &StorageError{Op: "get", Err: io.EOF}
 	ErrKeyExists     = &StorageError{Op: "set", Err: io.ErrUnexpectedEOF}

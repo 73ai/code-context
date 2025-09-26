@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from contextlib import contextmanager
 from pathlib import Path
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -345,7 +344,6 @@ class Application:
                     {"name": data["name"]}
                 )
 
-            # Invalidate cache
             self.cache_service.delete('users')
 
             return {"message": "User created", "id": 1}
@@ -409,19 +407,15 @@ async def main():
     """Main entry point."""
     app = Application()
 
-    # Example of using the application
     try:
         await app.start()
 
-        # Test health endpoint
         health_result = await app.api_service.handle_request('GET', '/health')
         print(f"Health check: {health_result}")
 
-        # Test users endpoint
         users_result = await app.api_service.handle_request('GET', '/users')
         print(f"Users: {users_result}")
 
-        # Test creating a user
         create_result = await app.api_service.handle_request(
             'POST', '/users', {'name': 'John Doe'}
         )

@@ -45,7 +45,6 @@ class StringUtils:
     @staticmethod
     def slugify(text: str, max_length: int = 50) -> str:
         """Convert text to URL-friendly slug."""
-        # Convert to lowercase and replace spaces with hyphens
         slug = re.sub(r'[^\w\s-]', '', text.lower())
         slug = re.sub(r'[-\s]+', '-', slug).strip('-')
         return slug[:max_length]
@@ -60,7 +59,6 @@ class StringUtils:
     @staticmethod
     def camel_to_snake(text: str) -> str:
         """Convert camelCase to snake_case."""
-        # Insert underscore before uppercase letters
         s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', text)
         return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
@@ -140,7 +138,6 @@ class ValidationUtils:
     @staticmethod
     def is_valid_phone(phone: str, country_code: str = "US") -> bool:
         """Basic phone number validation (simplified)."""
-        # Remove all non-digit characters
         digits_only = re.sub(r'\D', '', phone)
 
         if country_code == "US":
@@ -152,7 +149,6 @@ class ValidationUtils:
     @staticmethod
     def validate_credit_card(card_number: str) -> Tuple[bool, Optional[str]]:
         """Validate credit card using Luhn algorithm and detect card type."""
-        # Remove spaces and hyphens
         card_number = re.sub(r'[\s-]', '', card_number)
 
         if not card_number.isdigit():
@@ -392,11 +388,8 @@ class FileUtils:
     @staticmethod
     def safe_filename(filename: str) -> str:
         """Convert filename to safe version by removing invalid characters."""
-        # Remove or replace invalid characters
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        # Remove leading/trailing dots and spaces
         filename = filename.strip('. ')
-        # Limit length
         if len(filename) > 255:
             name, ext = os.path.splitext(filename)
             filename = name[:255-len(ext)] + ext
@@ -436,7 +429,6 @@ class CryptoUtils:
         if salt is None:
             salt = secrets.token_hex(32)
 
-        # Combine password and salt
         password_salt = (password + salt).encode('utf-8')
         password_hash = hashlib.sha256(password_salt).hexdigest()
 

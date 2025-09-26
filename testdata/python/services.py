@@ -26,7 +26,6 @@ from enum import Enum
 from pathlib import Path
 import uuid
 
-# Setup logging
 logger = logging.getLogger(__name__)
 
 
@@ -418,7 +417,6 @@ class PaymentService:
 
     async def refund_payment(self, payment_id: str, amount: Optional[int] = None) -> Dict[str, Any]:
         """Refund a payment."""
-        # Find the original payment
         payment = next((p for p in self.payment_history if p.id == payment_id), None)
         if not payment:
             raise PaymentServiceError(f"Payment {payment_id} not found")
@@ -430,7 +428,6 @@ class PaymentService:
         if refund_amount > payment.amount:
             raise PaymentServiceError("Refund amount cannot exceed original payment")
 
-        # Process refund
         await asyncio.sleep(0.5)  # Simulate API call
 
         refund_id = str(uuid.uuid4())
@@ -606,7 +603,6 @@ class SearchService:
             if s['timestamp'] >= cutoff_date
         ]
 
-        # Calculate popular queries
         query_counts = {}
         for search in recent_searches:
             query = search['query']

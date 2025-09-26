@@ -15,7 +15,6 @@ type JSONFormatter struct {
 	stats   map[string]*FileStats
 }
 
-// NewJSONFormatter creates a new JSON formatter
 func NewJSONFormatter(writer io.Writer, config FormatterConfig) *JSONFormatter {
 	encoder := json.NewEncoder(writer)
 	encoder.SetEscapeHTML(false)

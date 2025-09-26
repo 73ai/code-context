@@ -19,19 +19,15 @@ type SymbolExtractor struct {
 
 // SymbolIndex maintains an index of all symbols in a codebase
 type SymbolIndex struct {
-	// Symbol mappings
 	symbols       map[string][]*Symbol // symbol_name -> symbols
 	symbolsByFile map[string][]*Symbol // file_path -> symbols
 	symbolsByType map[SymbolKind][]*Symbol // symbol_type -> symbols
 
-	// References and relationships
 	references    map[string][]Location // symbol_id -> reference_locations
 	dependencies  map[string][]string   // file_path -> dependent_file_paths
 
-	// Scoping information
 	scopes        map[string]*ScopeTree // file_path -> scope_tree
 
-	// Index metadata
 	indexTime     time.Time
 	totalSymbols  int
 	totalFiles    int
@@ -97,7 +93,6 @@ const (
 	RelationExtends    RelationType = "extends"
 )
 
-// NewSymbolExtractor creates a new symbol extractor
 func NewSymbolExtractor(registry *LanguageRegistry) *SymbolExtractor {
 	return &SymbolExtractor{
 		registry: registry,
@@ -105,7 +100,6 @@ func NewSymbolExtractor(registry *LanguageRegistry) *SymbolExtractor {
 	}
 }
 
-// NewSymbolIndex creates a new symbol index
 func NewSymbolIndex() *SymbolIndex {
 	return &SymbolIndex{
 		symbols:       make(map[string][]*Symbol),
@@ -119,7 +113,6 @@ func NewSymbolIndex() *SymbolIndex {
 	}
 }
 
-// ExtractSymbols extracts symbols from a file with enhanced analysis
 func (se *SymbolExtractor) ExtractSymbols(filePath string, content []byte) (*ParseResult, error) {
 	result, err := se.parser.ParseFile(filePath, content)
 	if err != nil {
@@ -146,7 +139,6 @@ func (se *SymbolExtractor) ExtractSymbols(filePath string, content []byte) (*Par
 	return result, nil
 }
 
-// ExtractSymbolsFromDirectory extracts symbols from all supported files in a directory
 func (se *SymbolExtractor) ExtractSymbolsFromDirectory(ctx context.Context, dirPath string) (*SymbolIndex, error) {
 	index := NewSymbolIndex()
 
@@ -194,7 +186,6 @@ func (se *SymbolExtractor) ExtractSymbolsFromDirectory(ctx context.Context, dirP
 	return index, nil
 }
 
-// processFile processes a single file and updates the index
 func (se *SymbolExtractor) processFile(filePath string, index *SymbolIndex, mu *sync.Mutex) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -223,7 +214,6 @@ func (se *SymbolExtractor) processFile(filePath string, index *SymbolIndex, mu *
 	return nil
 }
 
-// enhanceSymbols adds additional metadata to symbols
 func (se *SymbolExtractor) enhanceSymbols(result *ParseResult) error {
 	for _, symbol := range result.Symbols {
 		// Generate unique symbol ID
@@ -242,13 +232,11 @@ func (se *SymbolExtractor) enhanceSymbols(result *ParseResult) error {
 	return nil
 }
 
-// generateID generates a unique identifier for a symbol
 func (s *Symbol) generateID() {
 	s.ID = fmt.Sprintf("%s:%d:%d:%s:%s",
 		s.FilePath, s.Line, s.Column, s.Kind, s.Name)
 }
 
-// inferSymbolProperties infers additional properties based on context and language
 func (se *SymbolExtractor) inferSymbolProperties(symbol *Symbol, result *ParseResult) {
 	// Language-specific property inference
 	switch result.Language {
@@ -263,7 +251,6 @@ func (se *SymbolExtractor) inferSymbolProperties(symbol *Symbol, result *ParseRe
 	}
 }
 
-// inferGoProperties infers Go-specific properties
 func (se *SymbolExtractor) inferGoProperties(symbol *Symbol, result *ParseResult) {
 	// Check if symbol is exported (starts with uppercase)
 	if len(symbol.Name) > 0 && strings.ToUpper(string(symbol.Name[0])) == string(symbol.Name[0]) {
@@ -281,9 +268,7 @@ func (se *SymbolExtractor) inferGoProperties(symbol *Symbol, result *ParseResult
 	}
 }
 
-// inferPythonProperties infers Python-specific properties
 func (se *SymbolExtractor) inferPythonProperties(symbol *Symbol, result *ParseResult) {
-	// Check naming conventions
 	name := symbol.Name
 
 	if strings.HasPrefix(name, "__") && strings.HasSuffix(name, "__") {
@@ -303,9 +288,7 @@ func (se *SymbolExtractor) inferPythonProperties(symbol *Symbol, result *ParseRe
 	}
 }
 
-// inferJSProperties infers JavaScript/TypeScript-specific properties
 func (se *SymbolExtractor) inferJSProperties(symbol *Symbol, result *ParseResult) {
-	// Check naming conventions
 	name := symbol.Name
 
 	if strings.HasPrefix(name, "_") {
@@ -320,7 +303,6 @@ func (se *SymbolExtractor) inferJSProperties(symbol *Symbol, result *ParseResult
 	}
 }
 
-// inferRustProperties infers Rust-specific properties
 func (se *SymbolExtractor) inferRustProperties(symbol *Symbol, result *ParseResult) {
 	// Rust has explicit visibility modifiers
 	// This would be enhanced with actual parsing of pub/pub(crate)/etc.
@@ -331,7 +313,6 @@ func (se *SymbolExtractor) inferRustProperties(symbol *Symbol, result *ParseResu
 	}
 }
 
-// extractDocumentation extracts documentation from comments
 func (se *SymbolExtractor) extractDocumentation(symbol *Symbol, result *ParseResult) {
 	// This would require parsing comments near the symbol
 	// For now, we'll use any existing docstring from the tree-sitter extraction
@@ -344,13 +325,11 @@ func (se *SymbolExtractor) extractDocumentation(symbol *Symbol, result *ParseRes
 	}
 }
 
-// determineVisibility determines symbol visibility
 func (se *SymbolExtractor) determineVisibility(symbol *Symbol, result *ParseResult) {
 	// This was partially handled in language-specific inference
 	// Additional logic could be added here for complex visibility rules
 }
 
-// buildScopeTree builds a hierarchical scope tree for a file
 func (se *SymbolExtractor) buildScopeTree(result *ParseResult) (*ScopeTree, error) {
 	scopeTree := &ScopeTree{
 		FilePath: result.FilePath,
@@ -370,7 +349,6 @@ func (se *SymbolExtractor) buildScopeTree(result *ParseResult) (*ScopeTree, erro
 	return scopeTree, nil
 }
 
-// insertSymbolIntoScope inserts a symbol into the appropriate scope node
 func (se *SymbolExtractor) insertSymbolIntoScope(scope *ScopeNode, symbol *Symbol) {
 	// Simple insertion logic - can be enhanced with proper tree-sitter scope analysis
 
@@ -400,7 +378,6 @@ func (se *SymbolExtractor) insertSymbolIntoScope(scope *ScopeNode, symbol *Symbo
 	}
 }
 
-// isScopeCreatingSymbol determines if a symbol creates a new scope
 func (se *SymbolExtractor) isScopeCreatingSymbol(symbol *Symbol) bool {
 	switch symbol.Kind {
 	case SymbolFunction, SymbolMethod, SymbolClass, SymbolInterface, SymbolStruct:
@@ -410,7 +387,6 @@ func (se *SymbolExtractor) isScopeCreatingSymbol(symbol *Symbol) bool {
 	}
 }
 
-// symbolKindToScopeKind converts a symbol kind to a scope kind
 func (se *SymbolExtractor) symbolKindToScopeKind(kind SymbolKind) ScopeKind {
 	switch kind {
 	case SymbolFunction:
@@ -424,12 +400,10 @@ func (se *SymbolExtractor) symbolKindToScopeKind(kind SymbolKind) ScopeKind {
 	}
 }
 
-// storeScopeTree stores a scope tree (placeholder for caching)
 func (se *SymbolExtractor) storeScopeTree(filePath string, scopeTree *ScopeTree) {
 	// This could be enhanced to store in a cache or database
 }
 
-// collectSupportedFiles collects all files that can be parsed
 func (se *SymbolExtractor) collectSupportedFiles(dirPath string) ([]string, error) {
 	var files []string
 	extensions := se.parser.GetSupportedExtensions()
@@ -463,7 +437,6 @@ func (se *SymbolExtractor) collectSupportedFiles(dirPath string) ([]string, erro
 	return files, err
 }
 
-// postProcessIndex performs post-processing on the symbol index
 func (se *SymbolExtractor) postProcessIndex(index *SymbolIndex) error {
 	index.mu.Lock()
 	defer index.mu.Unlock()
@@ -486,7 +459,6 @@ func (se *SymbolExtractor) postProcessIndex(index *SymbolIndex) error {
 	return nil
 }
 
-// buildCrossReferences builds symbol cross-references
 func (se *SymbolExtractor) buildCrossReferences(index *SymbolIndex) error {
 	// This is a simplified implementation
 	// A full implementation would use tree-sitter queries to find actual references
@@ -509,7 +481,6 @@ func (se *SymbolExtractor) buildCrossReferences(index *SymbolIndex) error {
 	return nil
 }
 
-// findSymbolReferences finds references to a symbol
 func (se *SymbolExtractor) findSymbolReferences(symbol *Symbol, content []byte, index *SymbolIndex) []Location {
 	var references []Location
 
@@ -542,7 +513,6 @@ func (se *SymbolExtractor) findSymbolReferences(symbol *Symbol, content []byte, 
 	return references
 }
 
-// isValidReference validates if a text match is a valid symbol reference
 func (se *SymbolExtractor) isValidReference(line string, col int, symbolName string) bool {
 	// Check boundaries to ensure it's a complete word
 	if col > 0 {
@@ -563,7 +533,6 @@ func (se *SymbolExtractor) isValidReference(line string, col int, symbolName str
 	return true
 }
 
-// GetSymbolsByKind returns symbols filtered by kind
 func (index *SymbolIndex) GetSymbolsByKind(kind SymbolKind) []*Symbol {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
@@ -571,7 +540,6 @@ func (index *SymbolIndex) GetSymbolsByKind(kind SymbolKind) []*Symbol {
 	return index.symbolsByType[kind]
 }
 
-// GetSymbolsByName returns symbols with a specific name
 func (index *SymbolIndex) GetSymbolsByName(name string) []*Symbol {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
@@ -579,7 +547,6 @@ func (index *SymbolIndex) GetSymbolsByName(name string) []*Symbol {
 	return index.symbols[name]
 }
 
-// GetSymbolsInFile returns all symbols in a specific file
 func (index *SymbolIndex) GetSymbolsInFile(filePath string) []*Symbol {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
@@ -587,7 +554,6 @@ func (index *SymbolIndex) GetSymbolsInFile(filePath string) []*Symbol {
 	return index.symbolsByFile[filePath]
 }
 
-// GetReferences returns references for a symbol
 func (index *SymbolIndex) GetReferences(symbolID string) []Location {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
@@ -595,7 +561,6 @@ func (index *SymbolIndex) GetReferences(symbolID string) []Location {
 	return index.references[symbolID]
 }
 
-// GetStats returns index statistics
 func (index *SymbolIndex) GetStats() map[string]interface{} {
 	index.mu.RLock()
 	defer index.mu.RUnlock()

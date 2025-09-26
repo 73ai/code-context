@@ -20,22 +20,18 @@ import (
 
 // RegexSearcher implements high-performance regex search with ripgrep compatibility
 type RegexSearcher struct {
-	// Compiled patterns for reuse
 	patterns map[string]*regexp.Regexp
 	patternsMutex sync.RWMutex
 
-	// Statistics tracking
 	stats       SearchStats
 	statsMutex  sync.RWMutex
 	filesProcessed int64
 	bytesProcessed int64
 	matchCount     int64
 
-	// Worker pool management
 	semaphore *semaphore.Weighted
 }
 
-// NewRegexSearcher creates a new regex searcher instance
 func NewRegexSearcher() (*RegexSearcher, error) {
 	return &RegexSearcher{
 		patterns:  make(map[string]*regexp.Regexp),
@@ -43,7 +39,6 @@ func NewRegexSearcher() (*RegexSearcher, error) {
 	}, nil
 }
 
-// Search performs regex search with parallel processing
 func (rs *RegexSearcher) Search(ctx context.Context, opts *SearchOptions) (<-chan SearchResult, <-chan error) {
 	results := make(chan SearchResult, 100)
 	errors := make(chan error, 10)
@@ -117,7 +112,6 @@ func (rs *RegexSearcher) Search(ctx context.Context, opts *SearchOptions) (<-cha
 	return results, errors
 }
 
-// compilePattern compiles the search pattern with appropriate flags
 func (rs *RegexSearcher) compilePattern(opts *SearchOptions) (*regexp.Regexp, error) {
 	patternKey := rs.getPatternKey(opts)
 
@@ -163,7 +157,6 @@ func (rs *RegexSearcher) compilePattern(opts *SearchOptions) (*regexp.Regexp, er
 	return compiled, nil
 }
 
-// getPatternKey creates a unique key for pattern caching
 func (rs *RegexSearcher) getPatternKey(opts *SearchOptions) string {
 	var keyParts []string
 	keyParts = append(keyParts, opts.Pattern)
@@ -184,7 +177,6 @@ func (rs *RegexSearcher) getPatternKey(opts *SearchOptions) string {
 	return strings.Join(keyParts, "|")
 }
 
-// collectFiles gathers all files to search based on options
 func (rs *RegexSearcher) collectFiles(opts *SearchOptions) ([]string, error) {
 	var files []string
 
@@ -220,7 +212,6 @@ func (rs *RegexSearcher) collectFiles(opts *SearchOptions) ([]string, error) {
 	return files, nil
 }
 
-// shouldIncludeFile determines if a file should be included in the search
 func (rs *RegexSearcher) shouldIncludeFile(filePath string, opts *SearchOptions) bool {
 	// Check file type filters
 	if len(opts.FileTypes) > 0 {
@@ -261,7 +252,6 @@ func (rs *RegexSearcher) shouldIncludeFile(filePath string, opts *SearchOptions)
 	return true
 }
 
-// searchFile searches a single file for matches
 func (rs *RegexSearcher) searchFile(ctx context.Context, filePath string, pattern *regexp.Regexp,
 	opts *SearchOptions, results chan<- SearchResult) error {
 
@@ -301,7 +291,6 @@ func (rs *RegexSearcher) searchFile(ctx context.Context, filePath string, patter
 	return rs.searchFileWithContext(file, filePath, pattern, opts, results)
 }
 
-// isBinaryFile checks if a file contains binary data
 func (rs *RegexSearcher) isBinaryFile(file *os.File) bool {
 	buf := make([]byte, 512)
 	n, err := file.Read(buf)
@@ -320,7 +309,6 @@ func (rs *RegexSearcher) isBinaryFile(file *os.File) bool {
 	return !utf8.Valid(buf[:n])
 }
 
-// searchFileCountOnly performs count-only search
 func (rs *RegexSearcher) searchFileCountOnly(file *os.File, filePath string, pattern *regexp.Regexp,
 	opts *SearchOptions, results chan<- SearchResult) error {
 
@@ -366,7 +354,6 @@ func (rs *RegexSearcher) searchFileCountOnly(file *os.File, filePath string, pat
 	return nil
 }
 
-// searchFileWithContext performs full search with context lines
 func (rs *RegexSearcher) searchFileWithContext(file *os.File, filePath string, pattern *regexp.Regexp,
 	opts *SearchOptions, results chan<- SearchResult) error {
 
@@ -453,7 +440,6 @@ func (rs *RegexSearcher) searchFileWithContext(file *os.File, filePath string, p
 	return nil
 }
 
-// resetStats resets search statistics
 func (rs *RegexSearcher) resetStats() {
 	rs.statsMutex.Lock()
 	defer rs.statsMutex.Unlock()
@@ -464,14 +450,12 @@ func (rs *RegexSearcher) resetStats() {
 	atomic.StoreInt64(&rs.matchCount, 0)
 }
 
-// updateStats safely updates search statistics
 func (rs *RegexSearcher) updateStats(fn func(*SearchStats)) {
 	rs.statsMutex.Lock()
 	defer rs.statsMutex.Unlock()
 	fn(&rs.stats)
 }
 
-// Stats returns current search statistics
 func (rs *RegexSearcher) Stats() SearchStats {
 	rs.statsMutex.RLock()
 	defer rs.statsMutex.RUnlock()
@@ -489,7 +473,6 @@ func (rs *RegexSearcher) Stats() SearchStats {
 	return stats
 }
 
-// Close cleans up resources
 func (rs *RegexSearcher) Close() error {
 	rs.patternsMutex.Lock()
 	defer rs.patternsMutex.Unlock()
@@ -500,7 +483,6 @@ func (rs *RegexSearcher) Close() error {
 	return nil
 }
 
-// Utility functions
 func maxInt(a, b int) int {
 	if a > b {
 		return a
@@ -515,7 +497,6 @@ func minInt(a, b int) int {
 	return b
 }
 
-// SearchFileMultiline performs multiline regex search on a file
 func (rs *RegexSearcher) searchFileMultiline(file *os.File, filePath string, pattern *regexp.Regexp,
 	opts *SearchOptions, results chan<- SearchResult) error {
 
@@ -584,7 +565,6 @@ func (rs *RegexSearcher) searchFileMultiline(file *os.File, filePath string, pat
 	return nil
 }
 
-// buildByteToLineColMap creates a mapping from byte position to line/column
 func (rs *RegexSearcher) buildByteToLineColMap(lines []string) map[int]struct{ line, col int } {
 	byteToLineCol := make(map[int]struct{ line, col int })
 	bytePos := 0
@@ -602,7 +582,6 @@ func (rs *RegexSearcher) buildByteToLineColMap(lines []string) map[int]struct{ l
 	return byteToLineCol
 }
 
-// extractContextLines extracts context lines around a match
 func (rs *RegexSearcher) extractContextLines(lines []string, startLine, endLine, contextBefore, contextAfter int) []string {
 	var context []string
 
@@ -619,7 +598,6 @@ func (rs *RegexSearcher) extractContextLines(lines []string, startLine, endLine,
 	return context
 }
 
-// isBinaryContent checks if content contains binary data
 func (rs *RegexSearcher) isBinaryContent(content []byte) bool {
 	// Check first 8KB for binary indicators
 	checkSize := minInt(len(content), 8192)

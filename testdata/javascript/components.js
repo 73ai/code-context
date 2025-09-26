@@ -50,15 +50,12 @@ export class BaseComponent extends EventEmitter {
     }
 
     createElement() {
-        // Override in subclasses to create DOM structure
     }
 
     bindEvents() {
-        // Override in subclasses to bind event listeners
     }
 
     render() {
-        // Override in subclasses to render component
     }
 
     update(options = {}) {
@@ -82,11 +79,9 @@ export class BaseComponent extends EventEmitter {
     }
 
     unbindEvents() {
-        // Override in subclasses to unbind event listeners
     }
 
     removeElement() {
-        // Override in subclasses to clean up DOM
     }
 
     show() {
@@ -296,12 +291,10 @@ export class Input extends BaseComponent {
         const value = this.getValue();
         const errors = [];
 
-        // Required validation
         if (this.options.required && !value.trim()) {
             errors.push('This field is required');
         }
 
-        // Custom validators
         for (const validator of this.options.validators) {
             const result = validator(value);
             if (result !== true) {
@@ -831,7 +824,6 @@ export class Tabs extends BaseComponent {
     activateTab(index) {
         if (index === this.activeIndex) return;
 
-        // Deactivate current tab
         if (this.activeIndex !== undefined) {
             this.tabs[this.activeIndex].setAttribute('aria-selected', 'false');
             this.tabs[this.activeIndex].setAttribute('tabindex', '-1');
@@ -839,7 +831,6 @@ export class Tabs extends BaseComponent {
             this.panels[this.activeIndex].hidden = true;
         }
 
-        // Activate new tab
         this.activeIndex = index;
         this.tabs[index].setAttribute('aria-selected', 'true');
         this.tabs[index].setAttribute('tabindex', '0');
@@ -910,7 +901,6 @@ export class ComponentRegistry {
     }
 }
 
-// Create default registry and register built-in components
 export const registry = new ComponentRegistry();
 registry.register('button', Button);
 registry.register('input', Input);
@@ -918,7 +908,6 @@ registry.register('modal', Modal);
 registry.register('dropdown', Dropdown);
 registry.register('tabs', Tabs);
 
-// Auto-initialize components when DOM is ready
 if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => registry.autoInit());
@@ -927,7 +916,6 @@ if (typeof document !== 'undefined') {
     }
 }
 
-// Export all components and utilities
 export {
     BaseComponent,
     Button,

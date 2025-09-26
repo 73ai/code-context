@@ -187,7 +187,6 @@ class RateLimiter {
         const now = Date.now();
         const windowStart = now - this.windowMs;
 
-        // Remove old requests
         this.requests = this.requests.filter(time => time > windowStart);
 
         return this.requests.length < this.maxRequests;
@@ -218,7 +217,6 @@ export class ApiClient extends EventEmitter {
         this.cache = new RequestCache();
         this.rateLimiter = new RateLimiter();
 
-        // Default configuration
         this.defaults = {
             timeout: 30000,
             retries: 3,
@@ -232,15 +230,12 @@ export class ApiClient extends EventEmitter {
             this.defaults.headers['Authorization'] = `Bearer ${this.apiKey}`;
         }
 
-        // Interceptors
         this.requestInterceptors = [];
         this.responseInterceptors = [];
 
-        // Request/response tracking
         this.activeRequests = new Map();
         this.requestId = 0;
 
-        // Stats
         this.stats = {
             requests: 0,
             responses: 0,
@@ -260,13 +255,11 @@ export class ApiClient extends EventEmitter {
         if (this.isInitialized) return;
 
         try {
-            // Test connectivity
             await this.healthCheck();
 
-            // Start periodic cache cleanup
             this.cacheCleanupInterval = setInterval(() => {
                 this.cache.cleanup();
-            }, 60000); // Every minute
+            }, 60000);
 
             this.isInitialized = true;
             this.emit('initialized');
@@ -283,7 +276,6 @@ export class ApiClient extends EventEmitter {
             clearInterval(this.cacheCleanupInterval);
         }
 
-        // Cancel active requests
         for (const [id, controller] of this.activeRequests) {
             controller.abort();
         }
@@ -322,7 +314,6 @@ export class ApiClient extends EventEmitter {
             headers: { ...this.defaults.headers, ...config.headers }
         });
 
-        // Build full URL
         if (mergedConfig.url && !mergedConfig.url.startsWith('http')) {
             mergedConfig.url = this.baseURL.replace(/\/$/, '') + '/' + mergedConfig.url.replace(/^\//, '');
         }
@@ -372,16 +363,13 @@ export class ApiClient extends EventEmitter {
         const requestId = ++this.requestId;
 
         try {
-            // Apply request interceptors
             const processedConfig = await this.applyRequestInterceptors(requestConfig);
 
-            // Check rate limiting
             if (!this.rateLimiter.canMakeRequest()) {
                 const waitTime = this.rateLimiter.getTimeUntilReset();
                 await this.sleep(waitTime);
             }
 
-            // Check cache
             if (processedConfig.cache && processedConfig.method === HttpMethods.GET) {
                 const cacheKey = this.cache.generateKey(processedConfig);
                 const cachedResponse = this.cache.get(cacheKey);
@@ -394,16 +382,13 @@ export class ApiClient extends EventEmitter {
                 this.stats.cacheMisses++;
             }
 
-            // Make the actual request
             const response = await this.makeRequest(processedConfig, requestId);
 
-            // Cache successful GET requests
             if (response.ok && processedConfig.cache && processedConfig.method === HttpMethods.GET) {
                 const cacheKey = this.cache.generateKey(processedConfig);
                 this.cache.set(cacheKey, response, processedConfig.cacheTTL);
             }
 
-            // Apply response interceptors
             const processedResponse = await this.applyResponseInterceptors(response);
 
             this.stats.responses++;
@@ -431,7 +416,6 @@ export class ApiClient extends EventEmitter {
 
             this.emit('request-start', { config, requestId, attempt });
 
-            // Create fetch options
             const fetchOptions = {
                 method: config.method,
                 headers: config.headers,
@@ -444,7 +428,6 @@ export class ApiClient extends EventEmitter {
                     : JSON.stringify(config.data);
             }
 
-            // Set timeout
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => {
                     controller.abort();
@@ -452,11 +435,9 @@ export class ApiClient extends EventEmitter {
                 }, config.timeout);
             });
 
-            // Make request
             const fetchPromise = fetch(config.url, fetchOptions);
             const response = await Promise.race([fetchPromise, timeoutPromise]);
 
-            // Parse response
             let data;
             const contentType = response.headers.get('content-type') || '';
 
@@ -477,7 +458,6 @@ export class ApiClient extends EventEmitter {
                 request: { requestId, attempt }
             });
 
-            // Validate response status
             if (!config.validateStatus(response.status)) {
                 throw new ApiError(
                     `Request failed with status ${response.status}: ${response.statusText}`,
@@ -492,7 +472,6 @@ export class ApiClient extends EventEmitter {
         } catch (error) {
             this.emit('request-error', { config, error, requestId, attempt });
 
-            // Retry logic
             if (attempt <= config.retries && this.shouldRetry(error)) {
                 this.stats.retries++;
                 await this.sleep(this.getRetryDelay(attempt));
@@ -519,7 +498,7 @@ export class ApiClient extends EventEmitter {
      * Calculate retry delay with exponential backoff
      */
     getRetryDelay(attempt) {
-        return Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Max 10 seconds
+        return Math.min(1000 * Math.pow(2, attempt - 1), 10000);
     }
 
     /**
@@ -647,10 +626,8 @@ export class ApiClient extends EventEmitter {
     }
 }
 
-// Factory function
 export function createApiClient(baseURL, apiKey) {
     return new ApiClient(baseURL, apiKey);
 }
 
-// Default export
 export default ApiClient;

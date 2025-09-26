@@ -42,7 +42,6 @@ class Application extends EventEmitter {
         this.isInitialized = false;
         this.isRunning = false;
 
-        // Bind methods to preserve context
         this.handleError = this.handleError.bind(this);
         this.handleUserAction = this.handleUserAction.bind(this);
         this.handleDataUpdate = this.handleDataUpdate.bind(this);
@@ -62,15 +61,12 @@ class Application extends EventEmitter {
         try {
             this.logger.info('Initializing application...');
 
-            // Initialize components in order
             await this.dataStore.initialize();
             await this.apiClient.initialize();
             await this.userManager.initialize();
 
-            // Setup event listeners
             this.setupEventListeners();
 
-            // Load initial data
             await this.loadInitialData();
 
             this.isInitialized = true;
@@ -99,11 +95,9 @@ class Application extends EventEmitter {
         try {
             this.logger.info('Starting application...');
 
-            // Start background tasks
             this.startHeartbeat();
             this.startPeriodicTasks();
 
-            // Setup DOM event listeners if in browser
             if (typeof window !== 'undefined') {
                 this.setupDOMEventListeners();
             }
@@ -130,16 +124,13 @@ class Application extends EventEmitter {
         try {
             this.logger.info('Stopping application...');
 
-            // Stop background tasks
             this.stopHeartbeat();
             this.stopPeriodicTasks();
 
-            // Cleanup components
             await this.userManager.cleanup();
             await this.apiClient.cleanup();
             await this.dataStore.cleanup();
 
-            // Remove event listeners
             this.removeAllListeners();
 
             this.isRunning = false;
@@ -156,16 +147,13 @@ class Application extends EventEmitter {
      * Setup internal event listeners
      */
     setupEventListeners() {
-        // User manager events
         this.userManager.on('user-login', this.handleUserAction);
         this.userManager.on('user-logout', this.handleUserAction);
         this.userManager.on('user-profile-updated', this.handleUserAction);
 
-        // Data store events
         this.dataStore.on('data-changed', this.handleDataUpdate);
         this.dataStore.on('storage-error', this.handleError);
 
-        // API client events
         this.apiClient.on('request-start', (event) => {
             this.logger.debug('API request started', event);
         });
@@ -174,7 +162,6 @@ class Application extends EventEmitter {
         });
         this.apiClient.on('request-error', this.handleError);
 
-        // Global error handling
         this.on('error', this.handleError);
 
         this.logger.debug('Event listeners setup complete');
@@ -186,7 +173,6 @@ class Application extends EventEmitter {
     setupDOMEventListeners() {
         if (typeof window === 'undefined') return;
 
-        // Page visibility change
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 this.logger.debug('Page hidden, pausing non-essential tasks');
@@ -197,7 +183,6 @@ class Application extends EventEmitter {
             }
         });
 
-        // Before page unload
         window.addEventListener('beforeunload', (event) => {
             this.logger.info('Page unloading, cleaning up...');
             this.stop().catch(error => {
@@ -205,7 +190,6 @@ class Application extends EventEmitter {
             });
         });
 
-        // Online/offline status
         window.addEventListener('online', () => {
             this.logger.info('Network connection restored');
             this.emit('network-online');
@@ -226,21 +210,18 @@ class Application extends EventEmitter {
         try {
             this.logger.info('Loading initial data...');
 
-            // Load configuration from API
             const remoteConfig = await this.apiClient.get('/config');
             if (remoteConfig) {
                 this.config = { ...this.config, ...remoteConfig };
                 this.logger.debug('Remote configuration loaded', remoteConfig);
             }
 
-            // Load user session if exists
             const sessionData = await this.dataStore.getItem('user-session');
             if (sessionData) {
                 await this.userManager.restoreSession(sessionData);
                 this.logger.debug('User session restored');
             }
 
-            // Load cached data
             const cachedData = await this.dataStore.getItem('app-cache');
             if (cachedData) {
                 this.emit('cached-data-loaded', cachedData);
@@ -250,7 +231,6 @@ class Application extends EventEmitter {
             this.logger.info('Initial data loading complete');
         } catch (error) {
             this.logger.warn('Some initial data failed to load', error);
-            // Don't throw - app can continue without some initial data
         }
     }
 
@@ -272,7 +252,7 @@ class Application extends EventEmitter {
             } catch (error) {
                 this.logger.warn('Heartbeat failed', error);
             }
-        }, 60000); // Every minute
+        }, 60000);
 
         this.logger.debug('Heartbeat started');
     }
@@ -292,12 +272,10 @@ class Application extends EventEmitter {
      * Start periodic background tasks
      */
     startPeriodicTasks() {
-        // Cleanup expired cache entries every 5 minutes
         this.cacheCleanupInterval = setInterval(() => {
             this.dataStore.cleanupExpired();
         }, 300000);
 
-        // Sync data every 10 minutes
         this.dataSyncInterval = setInterval(async () => {
             try {
                 await this.syncData();
@@ -383,7 +361,6 @@ class Application extends EventEmitter {
     handleError(error) {
         this.logger.error('Application error:', error);
 
-        // Categorize error types
         if (error.name === 'NetworkError') {
             this.emit('network-error', error);
         } else if (error.name === 'ValidationError') {
@@ -394,7 +371,6 @@ class Application extends EventEmitter {
             this.emit('generic-error', error);
         }
 
-        // In production, might send error reports to monitoring service
         if (this.config.debug) {
             console.error('Detailed error information:', {
                 message: error.message,
@@ -438,12 +414,10 @@ class Application extends EventEmitter {
     }
 }
 
-// Factory function for creating application instances
 export function createApplication(config) {
     return new Application(config);
 }
 
-// Default application instance (singleton pattern)
 let defaultApp = null;
 
 export function getDefaultApp() {
@@ -453,21 +427,18 @@ export function getDefaultApp() {
     return defaultApp;
 }
 
-// Browser-specific initialization
 if (typeof window !== 'undefined') {
-    // Auto-initialize when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', async () => {
             try {
                 const app = getDefaultApp();
                 await app.start();
-                window.app = app; // Make available globally for debugging
+                window.app = app;
             } catch (error) {
                 console.error('Failed to auto-start application:', error);
             }
         });
     } else {
-        // DOM already ready, initialize immediately
         setTimeout(async () => {
             try {
                 const app = getDefaultApp();
@@ -479,14 +450,12 @@ if (typeof window !== 'undefined') {
         }, 0);
     }
 
-    // Development tools
     if (APP_CONFIG.debug) {
         window.AppUtils = Utils;
         window.createApplication = createApplication;
     }
 }
 
-// Node.js specific exports
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         Application,

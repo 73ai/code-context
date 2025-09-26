@@ -36,33 +36,16 @@ type Stats struct {
 
 // Config holds configuration for the walker
 type Config struct {
-	// MaxWorkers controls the number of concurrent workers
-	// If 0, uses runtime.GOMAXPROCS(0)
 	MaxWorkers int
-
-	// MaxDepth limits directory traversal depth (0 = unlimited)
 	MaxDepth int
-
-	// FollowSymlinks determines if symbolic links should be followed
 	FollowSymlinks bool
-
-	// HiddenFiles controls whether hidden files/directories are included
 	HiddenFiles bool
-
-	// BufferSize is the size of the result channel buffer
 	BufferSize int
-
-	// Filters contains file filtering rules
 	Filters *Filters
-
-	// IgnoreRules contains gitignore-style ignore rules
 	IgnoreRules *IgnoreManager
-
-	// Context for cancellation
 	Context context.Context
 }
 
-// DefaultConfig returns a sensible default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		MaxWorkers:     runtime.GOMAXPROCS(0),
@@ -81,7 +64,6 @@ type Walker struct {
 	mu     sync.RWMutex
 }
 
-// New creates a new Walker with the given configuration
 func New(config *Config) (*Walker, error) {
 	if config == nil {
 		config = DefaultConfig()
@@ -106,21 +88,17 @@ func New(config *Config) (*Walker, error) {
 }
 
 
-// Walk traverses the file system starting from the given root path
 func (w *Walker) Walk(root string) (<-chan Result, error) {
-	// Resolve absolute path
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	// Check if root exists
 	rootInfo, err := os.Lstat(absRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat root path: %w", err)
 	}
 
-	// Initialize ignore rules if needed
 	if w.config.IgnoreRules == nil {
 		ignoreManager, err := NewIgnoreManager()
 		if err != nil {
@@ -129,25 +107,20 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 		w.config.IgnoreRules = ignoreManager
 	}
 
-	// Load gitignore files starting from root
 	if err := w.config.IgnoreRules.LoadFromPath(absRoot); err != nil {
 		return nil, fmt.Errorf("failed to load ignore rules: %w", err)
 	}
 
-	// Initialize filters if needed
 	if w.config.Filters == nil {
 		w.config.Filters = NewFilters()
 	}
 
-	// Configure filters based on walker settings
 	w.config.Filters.SetAllowHidden(w.config.HiddenFiles)
 
 	results := make(chan Result, w.config.BufferSize)
 
-	// Start timing
 	start := time.Now()
 
-	// Use a simpler approach with filepath.WalkDir for now
 	go func() {
 		defer func() {
 			w.stats.Duration = time.Since(start)
@@ -155,7 +128,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 		}()
 
 		if !rootInfo.IsDir() {
-			// Handle single file
 			if w.config.Filters.ShouldInclude(absRoot, rootInfo) {
 				w.recordFile(rootInfo.Size())
 				select {
@@ -166,7 +138,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 			return
 		}
 
-		// Walk directory tree
 		filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				w.recordError()
@@ -178,13 +149,11 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 				return nil // Continue walking
 			}
 
-			// Get relative path
 			relPath, _ := filepath.Rel(absRoot, path)
 			if relPath == "" {
 				relPath = "."
 			}
 
-			// Check context cancellation
 			select {
 			case <-w.config.Context.Done():
 				return fmt.Errorf("context canceled")
@@ -202,7 +171,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 				return nil
 			}
 
-			// Check depth limit
 			depth := strings.Count(relPath, string(filepath.Separator))
 			if w.config.MaxDepth > 0 && depth > w.config.MaxDepth {
 				if info.IsDir() {
@@ -211,7 +179,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 				return nil
 			}
 
-			// Check hidden files
 			if !w.config.HiddenFiles && isHidden(path) {
 				w.recordFiltered()
 				if info.IsDir() {
@@ -220,7 +187,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 				return nil
 			}
 
-			// Check ignore rules
 			if w.config.IgnoreRules.ShouldIgnore(relPath, info.IsDir()) {
 				if info.IsDir() {
 					w.recordDirIgnored()
@@ -234,7 +200,6 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 			if info.IsDir() {
 				w.recordDirTraversed()
 			} else {
-				// Regular file
 				if w.config.Filters.ShouldInclude(path, info) {
 					w.recordFile(info.Size())
 					select {
@@ -255,14 +220,12 @@ func (w *Walker) Walk(root string) (<-chan Result, error) {
 }
 
 
-// Stats returns current traversal statistics
 func (w *Walker) Stats() Stats {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return *w.stats
 }
 
-// Thread-safe stat recording methods
 func (w *Walker) recordFile(size int64) {
 	w.mu.Lock()
 	w.stats.FilesFound++
@@ -300,25 +263,20 @@ func (w *Walker) recordError() {
 	w.mu.Unlock()
 }
 
-// isHidden checks if a file or directory is hidden
 func isHidden(path string) bool {
-	// Check if the file itself is hidden
 	base := filepath.Base(path)
 	if len(base) > 0 && base[0] == '.' {
 		return true
 	}
 
-	// Check if any directory in the path is hidden
 	dir := filepath.Dir(path)
 	if dir == "." || dir == "/" {
 		return false
 	}
 
-	// Recursively check parent directories
 	return isHidden(dir)
 }
 
-// WalkSimple provides a simple interface for file system traversal
 func WalkSimple(root string) ([]Result, error) {
 	walker, err := New(DefaultConfig())
 	if err != nil {

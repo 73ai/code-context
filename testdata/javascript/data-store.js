@@ -224,11 +224,11 @@ export class MemoryStorageAdapter extends StorageAdapter {
 
     async get(key) {
         const item = this.data.get(key);
-        return item ? JSON.parse(JSON.stringify(item)) : null; // Deep clone
+        return item ? JSON.parse(JSON.stringify(item)) : null;
     }
 
     async set(key, value) {
-        this.data.set(key, JSON.parse(JSON.stringify(value))); // Deep clone
+        this.data.set(key, JSON.parse(JSON.stringify(value)));
         return true;
     }
 
@@ -287,11 +287,11 @@ export class DataStore extends EventEmitter {
         this.options = {
             adapter: 'localStorage',
             namespace: 'app',
-            defaultTTL: 1000 * 60 * 60, // 1 hour
+            defaultTTL: 1000 * 60 * 60,
             maxCacheSize: 100,
             persistToDisk: true,
             autoCleanup: true,
-            cleanupInterval: 1000 * 60 * 5, // 5 minutes
+            cleanupInterval: 1000 * 60 * 5,
             ...options
         };
 
@@ -337,12 +337,10 @@ export class DataStore extends EventEmitter {
         if (this.isReady) return;
 
         try {
-            // Load persisted cache if available
             if (this.options.persistToDisk) {
                 await this.loadPersistedCache();
             }
 
-            // Process pending operations
             for (const operation of this.pendingOperations) {
                 await operation();
             }
@@ -409,7 +407,6 @@ export class DataStore extends EventEmitter {
         }
 
         try {
-            // Check memory cache first
             if (this.cache.has(key)) {
                 const item = this.cache.get(key);
                 if (item.isExpired()) {
@@ -422,10 +419,8 @@ export class DataStore extends EventEmitter {
                 }
             }
 
-            // Check persistent storage
             const value = await this.adapter.get(key);
             if (value !== null) {
-                // Add to cache
                 const item = new CacheItem(value);
                 this.setCacheItem(key, item);
                 this.emit('cache-miss', key);
@@ -450,11 +445,9 @@ export class DataStore extends EventEmitter {
         }
 
         try {
-            // Create cache item
             const item = new CacheItem(value, ttl);
             this.setCacheItem(key, item);
 
-            // Persist to storage
             const success = await this.adapter.set(key, value);
 
             if (success) {
@@ -560,9 +553,7 @@ export class DataStore extends EventEmitter {
     }
 
     setCacheItem(key, item) {
-        // Enforce max cache size
         if (this.cache.size >= this.options.maxCacheSize) {
-            // Remove least recently used item
             let lruKey = null;
             let lruTime = Date.now();
 
@@ -584,7 +575,6 @@ export class DataStore extends EventEmitter {
     cleanup() {
         let cleaned = 0;
 
-        // Remove expired items from cache
         for (const [key, item] of this.cache.entries()) {
             if (item.isExpired()) {
                 this.cache.delete(key);
@@ -685,7 +675,6 @@ export class StateManager extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...this.state, ...newState };
 
-        // Notify watchers
         for (const [key, value] of Object.entries(newState)) {
             if (oldState[key] !== value) {
                 this.notifyWatchers(key, value, oldState[key]);
@@ -717,7 +706,6 @@ export class StateManager extends EventEmitter {
         mutation(this.state, payload);
         this.emit('mutation', { name: mutationName, payload, oldState, newState: this.state });
 
-        // Check for changed values and notify watchers
         for (const key of Object.keys(this.state)) {
             if (oldState[key] !== this.state[key]) {
                 this.notifyWatchers(key, this.state[key], oldState[key]);
@@ -755,7 +743,6 @@ export class StateManager extends EventEmitter {
         }
         this.watchers.get(key).add(callback);
 
-        // Return unwatch function
         return () => {
             const watchers = this.watchers.get(key);
             if (watchers) {
@@ -781,7 +768,6 @@ export class StateManager extends EventEmitter {
     }
 }
 
-// Factory functions
 export function createDataStore(options) {
     return new DataStore(options);
 }
@@ -790,6 +776,5 @@ export function createStateManager(initialState) {
     return new StateManager(initialState);
 }
 
-// Default exports
 export { DataStore, StateManager };
 export default DataStore;
