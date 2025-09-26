@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/73ai/code-context/internal/index"
+	"github.com/spf13/cobra"
 )
 
 var indexCmd = &cobra.Command{
@@ -260,12 +260,12 @@ func runIndexStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("📂 Semantic Index Status\n")
+	fmt.Printf("Semantic Index Status\n")
 	fmt.Printf("Index location: %s\n", indexPath)
 	fmt.Printf("Index size: %s\n", formatBytes(indexDirSize))
 	fmt.Println()
 
-	fmt.Printf("📊 Content Statistics\n")
+	fmt.Printf("Content Statistics\n")
 	fmt.Printf("Files indexed: %d\n", len(files))
 	fmt.Printf("Symbols indexed: %d\n", totalSymbols)
 	fmt.Printf("Source code size: %s\n", formatBytes(totalSize))
@@ -314,7 +314,7 @@ func runIndexStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\n🔍 Index Health: %s\n", "✅ Healthy")
+	fmt.Printf("\nIndex Health: %s\n", "✅ Healthy")
 
 	return nil
 }
