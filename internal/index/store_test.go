@@ -31,6 +31,10 @@ func TestStore(t *testing.T) {
 	t.Run("Search Operations", func(t *testing.T) {
 		testSearchOperations(t, store, ctx)
 	})
+
+	t.Run("Reference Operations", func(t *testing.T) {
+		testReferenceOperations(t, store, ctx)
+	})
 }
 
 func testSymbolOperations(t *testing.T, store *Store, ctx context.Context) {
@@ -318,5 +322,140 @@ func TestKeyGeneration(t *testing.T) {
 	expectedNameKey := []byte("name:testfunction")  // NameKey converts to lowercase
 	if string(nameKey) != string(expectedNameKey) {
 		t.Errorf("NameKey mismatch: expected %s, got %s", expectedNameKey, nameKey)
+	}
+
+	// Test RefKey - this is the critical fix we implemented
+	symbolHash := "abcdef123456"
+	fileHashRef := "fedcba654321"
+	line := 42
+	refKey := RefKey(symbolHash, fileHashRef, line)
+	expectedRefKey := []byte("ref:abcdef123456:fedcba654321:42")
+	if string(refKey) != string(expectedRefKey) {
+		t.Errorf("RefKey mismatch: expected %s, got %s", expectedRefKey, refKey)
+	}
+
+	// Test RefKey with different line numbers to ensure proper string conversion
+	refKey123 := RefKey(symbolHash, fileHashRef, 123)
+	expectedRefKey123 := []byte("ref:abcdef123456:fedcba654321:123")
+	if string(refKey123) != string(expectedRefKey123) {
+		t.Errorf("RefKey123 mismatch: expected %s, got %s", expectedRefKey123, refKey123)
+	}
+}
+
+func testReferenceOperations(t *testing.T, store *Store, ctx context.Context) {
+	// First create a symbol to reference
+	symbol := SymbolInfo{
+		ID:        "test-symbol-ref",
+		Name:      "RefTestFunction",
+		Type:      "function",
+		Kind:      "function",
+		FilePath:  "/test/ref-file.go",
+		StartLine: 10,
+		EndLine:   20,
+		StartCol:  1,
+		EndCol:    10,
+		Signature: "func RefTestFunction() error",
+		Tags:      []string{"test"},
+		LastUpdated: time.Now(),
+	}
+
+	if err := store.StoreSymbol(ctx, symbol); err != nil {
+		t.Errorf("Failed to store test symbol: %v", err)
+	}
+
+	// Test storing a single reference
+	ref1 := Reference{
+		SymbolID: symbol.ID,
+		FilePath: "/test/caller1.go",
+		Line:     25,
+		Column:   10,
+		Kind:     "call",
+		Context:  "result := RefTestFunction()",
+	}
+
+	if err := store.StoreReference(ctx, ref1); err != nil {
+		t.Errorf("Failed to store reference: %v", err)
+	}
+
+	// Test storing batch references
+	refs := []Reference{
+		{
+			SymbolID: symbol.ID,
+			FilePath: "/test/caller2.go",
+			Line:     15,
+			Column:   5,
+			Kind:     "reference",
+			Context:  "var f = RefTestFunction",
+		},
+		{
+			SymbolID: symbol.ID,
+			FilePath: "/test/caller3.go",
+			Line:     33,
+			Column:   8,
+			Kind:     "call",
+			Context:  "if err := RefTestFunction(); err != nil",
+		},
+	}
+
+	if err := store.StoreReferenceBatch(ctx, refs); err != nil {
+		t.Errorf("Failed to store reference batch: %v", err)
+	}
+
+	// Test retrieving references for symbol
+	retrievedRefs, err := store.GetReferencesForSymbol(ctx, symbol.ID)
+	if err != nil {
+		t.Errorf("Failed to get references for symbol: %v", err)
+	}
+
+	expectedRefCount := 3 // 1 individual + 2 batch
+	if len(retrievedRefs) != expectedRefCount {
+		t.Errorf("Expected %d references, got %d", expectedRefCount, len(retrievedRefs))
+	}
+
+	// Verify reference data integrity
+	foundRef1 := false
+	for _, ref := range retrievedRefs {
+		if ref.FilePath == ref1.FilePath && ref.Line == ref1.Line {
+			foundRef1 = true
+			if ref.Kind != ref1.Kind {
+				t.Errorf("Reference kind mismatch: expected %s, got %s", ref1.Kind, ref.Kind)
+			}
+			if ref.Context != ref1.Context {
+				t.Errorf("Reference context mismatch: expected %s, got %s", ref1.Context, ref.Context)
+			}
+			break
+		}
+	}
+	if !foundRef1 {
+		t.Error("Original reference not found in retrieved references")
+	}
+
+	// Test getting references in a specific file
+	fileRefs, err := store.GetReferencesInFile(ctx, "/test/caller2.go")
+	if err != nil {
+		t.Errorf("Failed to get references in file: %v", err)
+	}
+
+	if len(fileRefs) != 1 {
+		t.Errorf("Expected 1 reference in file, got %d", len(fileRefs))
+	}
+
+	if len(fileRefs) > 0 && fileRefs[0].Line != 15 {
+		t.Errorf("Expected reference at line 15, got line %d", fileRefs[0].Line)
+	}
+
+	// Test deleting references for symbol
+	if err := store.DeleteReferencesForSymbol(ctx, symbol.ID); err != nil {
+		t.Errorf("Failed to delete references for symbol: %v", err)
+	}
+
+	// Verify references are deleted
+	deletedRefs, err := store.GetReferencesForSymbol(ctx, symbol.ID)
+	if err != nil {
+		t.Errorf("Failed to get references after deletion: %v", err)
+	}
+
+	if len(deletedRefs) != 0 {
+		t.Errorf("Expected 0 references after deletion, got %d", len(deletedRefs))
 	}
 }

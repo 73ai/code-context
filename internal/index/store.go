@@ -155,7 +155,137 @@ func (s *Store) DeleteSymbol(ctx context.Context, filePath, symbolID string) err
 		}
 	}
 
+	// Also clean up references to this symbol
+	if err := s.DeleteReferencesForSymbol(ctx, symbolID); err != nil {
+		return fmt.Errorf("failed to delete references for symbol: %w", err)
+	}
+
 	return s.storage.WriteBatch(ctx, batch)
+}
+
+// Reference operations
+
+// StoreReference stores a reference to a symbol with appropriate indexing
+func (s *Store) StoreReference(ctx context.Context, ref Reference) error {
+	symbolHash := s.hashString(ref.SymbolID)
+	fileHash := s.hashString(ref.FilePath)
+	refKey := RefKey(symbolHash, fileHash, ref.Line)
+
+	// Store the reference data
+	refData, err := MarshalValue(ref)
+	if err != nil {
+		return fmt.Errorf("failed to marshal reference: %w", err)
+	}
+
+	return s.storage.Set(ctx, refKey, refData)
+}
+
+// GetReferencesForSymbol retrieves all references for a given symbol ID
+func (s *Store) GetReferencesForSymbol(ctx context.Context, symbolID string) ([]Reference, error) {
+	symbolHash := s.hashString(symbolID)
+	prefix := []byte(PrefixRef + symbolHash + ":")
+
+	var references []Reference
+	iter := s.storage.Scan(ctx, prefix, ScanOptions{})
+	defer iter.Close()
+
+	for iter.Next() {
+		key := iter.Key()
+		// Ensure the key actually starts with our prefix
+		if len(key) < len(prefix) || !bytes.Equal(key[:len(prefix)], prefix) {
+			break // No more keys with this prefix
+		}
+
+		var ref Reference
+		if err := UnmarshalValue(iter.Value(), &ref); err != nil {
+			continue // Skip corrupted entries
+		}
+		references = append(references, ref)
+	}
+
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+
+	return references, nil
+}
+
+// StoreReferenceBatch efficiently stores multiple references in a single batch operation
+func (s *Store) StoreReferenceBatch(ctx context.Context, refs []Reference) error {
+	if len(refs) == 0 {
+		return nil
+	}
+
+	batch := s.storage.Batch()
+
+	for _, ref := range refs {
+		symbolHash := s.hashString(ref.SymbolID)
+		fileHash := s.hashString(ref.FilePath)
+		refKey := RefKey(symbolHash, fileHash, ref.Line)
+
+		// Store the reference data
+		refData, err := MarshalValue(ref)
+		if err != nil {
+			return fmt.Errorf("failed to marshal reference: %w", err)
+		}
+
+		batch.Set(refKey, refData)
+	}
+
+	return s.storage.WriteBatch(ctx, batch)
+}
+
+// DeleteReferencesForSymbol removes all references to a specific symbol
+func (s *Store) DeleteReferencesForSymbol(ctx context.Context, symbolID string) error {
+	symbolHash := s.hashString(symbolID)
+	prefix := []byte(PrefixRef + symbolHash + ":")
+
+	batch := s.storage.Batch()
+
+	iter := s.storage.Scan(ctx, prefix, ScanOptions{KeysOnly: true})
+	defer iter.Close()
+
+	for iter.Next() {
+		key := iter.Key()
+		// Ensure the key actually starts with our prefix
+		if len(key) < len(prefix) || !bytes.Equal(key[:len(prefix)], prefix) {
+			break // No more keys with this prefix
+		}
+		batch.Delete(key)
+	}
+
+	if err := iter.Error(); err != nil {
+		return err
+	}
+
+	return s.storage.WriteBatch(ctx, batch)
+}
+
+// GetReferencesInFile retrieves all references within a specific file
+func (s *Store) GetReferencesInFile(ctx context.Context, filePath string) ([]Reference, error) {
+	fileHash := s.hashString(filePath)
+
+	var references []Reference
+	iter := s.storage.Scan(ctx, []byte(PrefixRef), ScanOptions{})
+	defer iter.Close()
+
+	for iter.Next() {
+		key := string(iter.Key())
+		// Check if this reference is in the requested file
+		// Key format: "ref:{symbol_hash}:{file_hash}:{line}"
+		if strings.Contains(key, ":"+fileHash+":") {
+			var ref Reference
+			if err := UnmarshalValue(iter.Value(), &ref); err == nil {
+				references = append(references, ref)
+			}
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+
+	return references, nil
 }
 
 // File metadata operations

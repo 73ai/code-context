@@ -76,11 +76,16 @@ func DefaultBuilderConfig() BuilderConfig {
 // BuildProgress tracks the progress of index building
 type BuildProgress struct {
 	// Atomic counters for thread-safe access
-	filesDiscovered int64
-	filesProcessed  int64
-	filesSkipped    int64
-	filesErrored    int64
-	symbolsIndexed  int64
+	filesDiscovered    int64
+	filesProcessed     int64
+	filesSkipped       int64
+	filesErrored       int64
+	symbolsIndexed     int64
+	referencesIndexed  int64
+
+	// Phase tracking for two-phase indexing
+	currentPhase string // "symbols", "references", or "complete"
+	phaseStartTime time.Time
 
 	// Timing information
 	startTime   time.Time
@@ -101,15 +106,16 @@ type BuildError struct {
 
 // BuildStats provides detailed statistics about the build process
 type BuildStats struct {
-	FilesDiscovered int64         `json:"files_discovered"`
-	FilesProcessed  int64         `json:"files_processed"`
-	FilesSkipped    int64         `json:"files_skipped"`
-	FilesErrored    int64         `json:"files_errored"`
-	SymbolsIndexed  int64         `json:"symbols_indexed"`
-	Duration        time.Duration `json:"duration"`
-	StartTime       time.Time     `json:"start_time"`
-	EndTime         time.Time     `json:"end_time"`
-	Errors          []BuildError  `json:"errors,omitempty"`
+	FilesDiscovered    int64         `json:"files_discovered"`
+	FilesProcessed     int64         `json:"files_processed"`
+	FilesSkipped       int64         `json:"files_skipped"`
+	FilesErrored       int64         `json:"files_errored"`
+	SymbolsIndexed     int64         `json:"symbols_indexed"`
+	ReferencesIndexed  int64         `json:"references_indexed"`
+	Duration           time.Duration `json:"duration"`
+	StartTime          time.Time     `json:"start_time"`
+	EndTime            time.Time     `json:"end_time"`
+	Errors             []BuildError  `json:"errors,omitempty"`
 }
 
 // SymbolParser defines the interface for parsing symbols from source files
@@ -117,11 +123,18 @@ type SymbolParser interface {
 	// ParseFile extracts symbols from a source file
 	ParseFile(ctx context.Context, filePath string) ([]SymbolInfo, error)
 
+	// ParseReferences extracts references from a source file
+	// This requires that symbols have been previously parsed and stored
+	ParseReferences(ctx context.Context, filePath string, symbolIndex SymbolIndex) ([]Reference, error)
+
 	// SupportedLanguages returns the languages this parser supports
 	SupportedLanguages() []string
 
 	// IsSupported checks if the parser supports the given file
 	IsSupported(filePath string) bool
+
+	// SupportsReferences indicates if this parser can extract references
+	SupportsReferences() bool
 }
 
 // NewBuilder creates a new index builder
@@ -169,8 +182,33 @@ func (b *Builder) BuildIndex(ctx context.Context, roots ...string) (*BuildStats,
 		}
 	}
 
-	// Process files in parallel
-	err = b.processFiles(buildCtx, files)
+	// Phase 1: Process symbols
+	b.setPhase("symbols")
+	err = b.processFilesSymbols(buildCtx, files)
+	if err != nil {
+		// Stop progress reporting before returning
+		if progressDone != nil {
+			close(progressDone)
+		}
+		stats := b.collectStats()
+		return stats, fmt.Errorf("failed to process symbols: %w", err)
+	}
+
+	// Phase 2: Process references (if parser supports them)
+	if b.parser.SupportsReferences() {
+		b.setPhase("references")
+		err = b.processFilesReferences(buildCtx, files)
+		if err != nil {
+			// Stop progress reporting before returning
+			if progressDone != nil {
+				close(progressDone)
+			}
+			stats := b.collectStats()
+			return stats, fmt.Errorf("failed to process references: %w", err)
+		}
+	}
+
+	b.setPhase("complete")
 
 	// Stop progress reporting
 	if progressDone != nil {
@@ -179,10 +217,6 @@ func (b *Builder) BuildIndex(ctx context.Context, roots ...string) (*BuildStats,
 
 	// Collect final statistics
 	stats := b.collectStats()
-
-	if err != nil {
-		return stats, fmt.Errorf("failed to process files: %w", err)
-	}
 
 	return stats, nil
 }
@@ -302,18 +336,18 @@ func (b *Builder) filterChangedFiles(ctx context.Context, files []string) ([]str
 	return changedFiles, nil
 }
 
-// processFiles processes files in parallel using worker goroutines
-func (b *Builder) processFiles(ctx context.Context, files []string) error {
+// processFilesSymbols processes files to extract symbols in parallel
+func (b *Builder) processFilesSymbols(ctx context.Context, files []string) error {
 	// Create work channel
 	workChan := make(chan string, b.config.BatchSize)
 
 	// Create error group for coordinated cancellation
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Start workers
+	// Start symbol workers
 	for i := 0; i < b.config.Workers; i++ {
 		g.Go(func() error {
-			return b.worker(gCtx, workChan)
+			return b.symbolWorker(gCtx, workChan)
 		})
 	}
 
@@ -334,8 +368,50 @@ func (b *Builder) processFiles(ctx context.Context, files []string) error {
 	return g.Wait()
 }
 
-// worker processes files from the work channel
-func (b *Builder) worker(ctx context.Context, workChan <-chan string) error {
+// processFilesReferences processes files to extract references in parallel
+func (b *Builder) processFilesReferences(ctx context.Context, files []string) error {
+	// Create work channel
+	workChan := make(chan string, b.config.BatchSize)
+
+	// Create error group for coordinated cancellation
+	g, gCtx := errgroup.WithContext(ctx)
+
+	// Build symbol index for reference resolution
+	symbolIndex, err := b.buildSymbolIndex(gCtx)
+	if err != nil {
+		return fmt.Errorf("failed to build symbol index for references: %w", err)
+	}
+
+	if b.config.Verbose {
+		fmt.Printf("[INDEX] Built symbol index with %d symbols for reference resolution\n", len(symbolIndex))
+	}
+
+	// Start reference workers
+	for i := 0; i < b.config.Workers; i++ {
+		g.Go(func() error {
+			return b.referenceWorker(gCtx, workChan, symbolIndex)
+		})
+	}
+
+	// Send work to workers
+	g.Go(func() error {
+		defer close(workChan)
+
+		for _, file := range files {
+			select {
+			case workChan <- file:
+			case <-gCtx.Done():
+				return gCtx.Err()
+			}
+		}
+		return nil
+	})
+
+	return g.Wait()
+}
+
+// symbolWorker processes files to extract symbols from the work channel
+func (b *Builder) symbolWorker(ctx context.Context, workChan <-chan string) error {
 	for {
 		select {
 		case file, ok := <-workChan:
@@ -344,7 +420,7 @@ func (b *Builder) worker(ctx context.Context, workChan <-chan string) error {
 			}
 
 			b.updateCurrentFile(file)
-			if err := b.processFile(ctx, file); err != nil {
+			if err := b.processFileSymbols(ctx, file); err != nil {
 				b.recordError(file, err)
 				atomic.AddInt64(&b.progress.filesErrored, 1)
 			} else {
@@ -357,8 +433,29 @@ func (b *Builder) worker(ctx context.Context, workChan <-chan string) error {
 	}
 }
 
-// processFile processes a single file and updates the index
-func (b *Builder) processFile(ctx context.Context, filePath string) error {
+// referenceWorker processes files to extract references from the work channel
+func (b *Builder) referenceWorker(ctx context.Context, workChan <-chan string, symbolIndex SymbolIndex) error {
+	for {
+		select {
+		case file, ok := <-workChan:
+			if !ok {
+				return nil // Channel closed
+			}
+
+			b.updateCurrentFile(file)
+			if err := b.processFileReferences(ctx, file, symbolIndex); err != nil {
+				b.recordError(file, err)
+				atomic.AddInt64(&b.progress.filesErrored, 1)
+			}
+
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// processFileSymbols processes a single file to extract symbols and updates the index
+func (b *Builder) processFileSymbols(ctx context.Context, filePath string) error {
 	// Check if parser supports this file
 	if !b.parser.IsSupported(filePath) {
 		return nil // Not an error, just skip
@@ -414,6 +511,114 @@ func (b *Builder) processFile(ctx context.Context, filePath string) error {
 	return nil
 }
 
+// processFileReferences processes a single file to extract references
+func (b *Builder) processFileReferences(ctx context.Context, filePath string, symbolIndex SymbolIndex) error {
+	// Check if parser supports this file and references
+	if !b.parser.IsSupported(filePath) || !b.parser.SupportsReferences() {
+		return nil // Not an error, just skip
+	}
+
+	// Parse references from file with retry logic for robustness
+	var references []Reference
+	var err error
+	maxRetries := 2
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		references, err = b.parser.ParseReferences(ctx, filePath, symbolIndex)
+		if err == nil {
+			break // Success
+		}
+
+		if attempt < maxRetries {
+			if b.config.Verbose {
+				fmt.Printf("[INDEX] Reference parsing attempt %d failed for %s: %v, retrying...\n", attempt+1, filePath, err)
+			}
+			// Add a small delay before retry
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			// Log the final error but don't fail the entire process
+			b.recordError(filePath, fmt.Errorf("failed to parse references after %d attempts: %w", maxRetries+1, err))
+			return nil // Continue with other files
+		}
+	}
+
+	// Validate references before storing
+	validReferences := b.validateReferences(references, filePath)
+	if len(validReferences) < len(references) && b.config.Verbose {
+		fmt.Printf("[INDEX] Filtered %d invalid references from %s\n", len(references)-len(validReferences), filePath)
+	}
+
+	// Store references in batches for better performance
+	if len(validReferences) > 0 {
+		// Split into smaller batches to avoid memory pressure
+		batchSize := b.config.BatchSize
+		if batchSize == 0 {
+			batchSize = 100 // Default batch size
+		}
+
+		for i := 0; i < len(validReferences); i += batchSize {
+			end := i + batchSize
+			if end > len(validReferences) {
+				end = len(validReferences)
+			}
+
+			batch := validReferences[i:end]
+			if err := b.store.StoreReferenceBatch(ctx, batch); err != nil {
+				// Log error but continue with remaining batches
+				b.recordError(filePath, fmt.Errorf("failed to store reference batch %d-%d: %w", i, end-1, err))
+				continue
+			}
+
+			atomic.AddInt64(&b.progress.referencesIndexed, int64(len(batch)))
+		}
+	}
+
+	return nil
+}
+
+// validateReferences filters out invalid or malformed references
+func (b *Builder) validateReferences(references []Reference, filePath string) []Reference {
+	var valid []Reference
+
+	for _, ref := range references {
+		// Basic validation checks
+		if ref.SymbolID == "" {
+			if b.config.Verbose {
+				fmt.Printf("[INDEX] Skipping reference with empty SymbolID in %s at line %d\n", filePath, ref.Line)
+			}
+			continue
+		}
+
+		if ref.Line < 1 {
+			if b.config.Verbose {
+				fmt.Printf("[INDEX] Skipping reference with invalid line number %d in %s\n", ref.Line, filePath)
+			}
+			continue
+		}
+
+		if ref.Column < 0 {
+			if b.config.Verbose {
+				fmt.Printf("[INDEX] Skipping reference with invalid column number %d in %s\n", ref.Column, filePath)
+			}
+			continue
+		}
+
+		// Ensure file path is set correctly
+		if ref.FilePath == "" {
+			ref.FilePath = filePath
+		}
+
+		// Set default kind if not specified
+		if ref.Kind == "" {
+			ref.Kind = "reference"
+		}
+
+		valid = append(valid, ref)
+	}
+
+	return valid
+}
+
 // calculateFileHash calculates SHA256 hash of file contents
 func (b *Builder) calculateFileHash(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
@@ -459,6 +664,15 @@ func (b *Builder) detectLanguage(filePath string) string {
 	}
 }
 
+// setPhase updates the current indexing phase (thread-safe)
+func (b *Builder) setPhase(phase string) {
+	b.progress.mutex.Lock()
+	defer b.progress.mutex.Unlock()
+
+	b.progress.currentPhase = phase
+	b.progress.phaseStartTime = time.Now()
+}
+
 // updateCurrentFile updates the currently processing file (thread-safe)
 func (b *Builder) updateCurrentFile(file string) {
 	b.progress.mutex.Lock()
@@ -466,6 +680,56 @@ func (b *Builder) updateCurrentFile(file string) {
 
 	b.progress.currentFile = file
 	b.progress.updateTime = time.Now()
+}
+
+// buildSymbolIndex creates an in-memory symbol index from stored symbols
+func (b *Builder) buildSymbolIndex(ctx context.Context) (SymbolIndex, error) {
+	// Get all indexed files
+	files, err := b.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file list for symbol index: %w", err)
+	}
+
+	if len(files) == 0 {
+		if b.config.Verbose {
+			fmt.Printf("[INDEX] Warning: No files found for symbol index building\n")
+		}
+		return SymbolIndex{}, nil
+	}
+
+	var allSymbols []SymbolInfo
+	errorCount := 0
+	maxErrors := len(files) / 2 // Allow up to 50% of files to fail
+
+	for _, file := range files {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		symbols, err := b.store.GetSymbolsInFile(ctx, file.Path)
+		if err != nil {
+			errorCount++
+			// Log the error but continue with other files
+			b.recordError(file.Path, fmt.Errorf("failed to get symbols for index: %w", err))
+
+			// If too many files are failing, something is seriously wrong
+			if errorCount > maxErrors {
+				return nil, fmt.Errorf("too many files (%d/%d) failed during symbol index building, last error: %w",
+					errorCount, len(files), err)
+			}
+			continue
+		}
+		allSymbols = append(allSymbols, symbols...)
+	}
+
+	if errorCount > 0 && b.config.Verbose {
+		fmt.Printf("[INDEX] Symbol index built with %d symbols from %d files (%d files had errors)\n",
+			len(allSymbols), len(files)-errorCount, errorCount)
+	}
+
+	return SymbolIndex(allSymbols), nil
 }
 
 // recordError records a build error (thread-safe)
@@ -512,12 +776,17 @@ func (b *Builder) logProgress() {
 	skipped := atomic.LoadInt64(&b.progress.filesSkipped)
 	errored := atomic.LoadInt64(&b.progress.filesErrored)
 	symbols := atomic.LoadInt64(&b.progress.symbolsIndexed)
+	references := atomic.LoadInt64(&b.progress.referencesIndexed)
+
+	b.progress.mutex.RLock()
+	phase := b.progress.currentPhase
+	b.progress.mutex.RUnlock()
 
 	elapsed := time.Since(b.progress.startTime)
 	remaining := discovered - processed - skipped - errored
 
-	fmt.Printf("[INDEX] Progress: %d/%d files processed (%d skipped, %d errors), %d symbols indexed, %v elapsed, current: %s\n",
-		processed, discovered, skipped, errored, symbols, elapsed.Round(time.Second), currentFile)
+	fmt.Printf("[INDEX] Phase: %s, Progress: %d/%d files processed (%d skipped, %d errors), %d symbols, %d references indexed, %v elapsed, current: %s\n",
+		phase, processed, discovered, skipped, errored, symbols, references, elapsed.Round(time.Second), currentFile)
 
 	if processed > 0 {
 		avgTime := elapsed / time.Duration(processed)
@@ -536,15 +805,16 @@ func (b *Builder) collectStats() *BuildStats {
 	b.progress.mutex.RUnlock()
 
 	return &BuildStats{
-		FilesDiscovered: atomic.LoadInt64(&b.progress.filesDiscovered),
-		FilesProcessed:  atomic.LoadInt64(&b.progress.filesProcessed),
-		FilesSkipped:    atomic.LoadInt64(&b.progress.filesSkipped),
-		FilesErrored:    atomic.LoadInt64(&b.progress.filesErrored),
-		SymbolsIndexed:  atomic.LoadInt64(&b.progress.symbolsIndexed),
-		Duration:        endTime.Sub(b.progress.startTime),
-		StartTime:       b.progress.startTime,
-		EndTime:         endTime,
-		Errors:          errors,
+		FilesDiscovered:    atomic.LoadInt64(&b.progress.filesDiscovered),
+		FilesProcessed:     atomic.LoadInt64(&b.progress.filesProcessed),
+		FilesSkipped:       atomic.LoadInt64(&b.progress.filesSkipped),
+		FilesErrored:       atomic.LoadInt64(&b.progress.filesErrored),
+		SymbolsIndexed:     atomic.LoadInt64(&b.progress.symbolsIndexed),
+		ReferencesIndexed:  atomic.LoadInt64(&b.progress.referencesIndexed),
+		Duration:           endTime.Sub(b.progress.startTime),
+		StartTime:          b.progress.startTime,
+		EndTime:            endTime,
+		Errors:             errors,
 	}
 }
 
@@ -554,15 +824,18 @@ func (b *Builder) GetProgress() BuildProgress {
 	defer b.progress.mutex.RUnlock()
 
 	return BuildProgress{
-		filesDiscovered: atomic.LoadInt64(&b.progress.filesDiscovered),
-		filesProcessed:  atomic.LoadInt64(&b.progress.filesProcessed),
-		filesSkipped:    atomic.LoadInt64(&b.progress.filesSkipped),
-		filesErrored:    atomic.LoadInt64(&b.progress.filesErrored),
-		symbolsIndexed:  atomic.LoadInt64(&b.progress.symbolsIndexed),
-		startTime:       b.progress.startTime,
-		updateTime:      b.progress.updateTime,
-		currentFile:     b.progress.currentFile,
-		errors:          append([]BuildError{}, b.progress.errors...),
+		filesDiscovered:   atomic.LoadInt64(&b.progress.filesDiscovered),
+		filesProcessed:    atomic.LoadInt64(&b.progress.filesProcessed),
+		filesSkipped:      atomic.LoadInt64(&b.progress.filesSkipped),
+		filesErrored:      atomic.LoadInt64(&b.progress.filesErrored),
+		symbolsIndexed:    atomic.LoadInt64(&b.progress.symbolsIndexed),
+		referencesIndexed: atomic.LoadInt64(&b.progress.referencesIndexed),
+		currentPhase:      b.progress.currentPhase,
+		phaseStartTime:    b.progress.phaseStartTime,
+		startTime:         b.progress.startTime,
+		updateTime:        b.progress.updateTime,
+		currentFile:       b.progress.currentFile,
+		errors:            append([]BuildError{}, b.progress.errors...),
 	}
 }
 

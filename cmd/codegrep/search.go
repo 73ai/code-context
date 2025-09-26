@@ -324,7 +324,10 @@ func (e *RealSearchEngine) searchSymbols(ctx context.Context, store *index.Store
 			searchResult.Context["documentation"] = symbol.DocString
 		}
 
-		searchResults = append(searchResults, searchResult)
+		// Apply file type filtering
+		if e.shouldSearchFile(searchResult.File) {
+			searchResults = append(searchResults, searchResult)
+		}
 	}
 
 	return searchResults, nil
@@ -350,18 +353,32 @@ func (e *RealSearchEngine) searchReferences(ctx context.Context, store *index.St
 
 	// For each symbol, search for references
 	var searchResults []SearchResult
+	resultMap := make(map[string]SearchResult) // Deduplicate by file:line:col
+
 	for _, symbol := range symbolResult.Symbols {
-		refs, err := e.findReferencesForSymbol(ctx, store, symbol.ID, symbol.FilePath)
+		refs, err := e.findReferencesForSymbol(ctx, store, symbol.ID, symbol.Name)
 		if err != nil {
 			continue // Skip on error, don't fail the entire search
 		}
 
-		searchResults = append(searchResults, refs...)
+		// Deduplicate results by file:line:column
+		for _, ref := range refs {
+			key := fmt.Sprintf("%s:%d:%d", ref.File, ref.LineNumber, ref.Column)
+			if _, exists := resultMap[key]; !exists {
+				resultMap[key] = ref
+			}
+		}
 
 		// Respect max count limit
-		if e.config.MaxCount > 0 && len(searchResults) >= e.config.MaxCount {
-			searchResults = searchResults[:e.config.MaxCount]
+		if e.config.MaxCount > 0 && len(resultMap) >= e.config.MaxCount {
 			break
+		}
+	}
+
+	// Convert map back to slice and apply file type filtering
+	for _, result := range resultMap {
+		if e.shouldSearchFile(result.File) {
+			searchResults = append(searchResults, result)
 		}
 	}
 
@@ -410,7 +427,10 @@ func (e *RealSearchEngine) searchTypes(ctx context.Context, store *index.Store, 
 				searchResult.Context["documentation"] = symbol.DocString
 			}
 
-			searchResults = append(searchResults, searchResult)
+			// Apply file type filtering
+			if e.shouldSearchFile(searchResult.File) {
+				searchResults = append(searchResults, searchResult)
+			}
 		}
 	}
 
@@ -441,7 +461,7 @@ func (e *RealSearchEngine) searchCallGraph(ctx context.Context, store *index.Sto
 	var searchResults []SearchResult
 	for _, symbol := range symbolResult.Symbols {
 		// Add the function definition itself
-		searchResults = append(searchResults, SearchResult{
+		definitionResult := SearchResult{
 			File:       symbol.FilePath,
 			LineNumber: symbol.StartLine,
 			Column:     symbol.StartCol,
@@ -453,15 +473,25 @@ func (e *RealSearchEngine) searchCallGraph(ctx context.Context, store *index.Sto
 				"scope":      "definition",
 				"call_type":  "definition",
 			},
-		})
+		}
+
+		// Apply file type filtering
+		if e.shouldSearchFile(definitionResult.File) {
+			searchResults = append(searchResults, definitionResult)
+		}
 
 		// Find calls to this function
-		callRefs, err := e.findCallsForSymbol(ctx, store, symbol.ID, symbol.FilePath)
+		callRefs, err := e.findCallsForSymbol(ctx, store, symbol.ID, symbol.Name)
 		if err != nil {
 			continue // Skip on error
 		}
 
-		searchResults = append(searchResults, callRefs...)
+		// Apply file type filtering to call references
+		for _, callRef := range callRefs {
+			if e.shouldSearchFile(callRef.File) {
+				searchResults = append(searchResults, callRef)
+			}
+		}
 
 		// Respect max count limit
 		if e.config.MaxCount > 0 && len(searchResults) >= e.config.MaxCount {
@@ -474,7 +504,7 @@ func (e *RealSearchEngine) searchCallGraph(ctx context.Context, store *index.Sto
 }
 
 // Helper methods for finding references and calls
-func (e *RealSearchEngine) findReferencesForSymbol(ctx context.Context, store *index.Store, symbolID, filePath string) ([]SearchResult, error) {
+func (e *RealSearchEngine) findReferencesForSymbol(ctx context.Context, store *index.Store, symbolID, symbolName string) ([]SearchResult, error) {
 	// Search for references using the ref prefix
 	symbolHash := e.hashString(symbolID)
 	prefix := []byte("ref:" + symbolHash + ":")
@@ -493,7 +523,7 @@ func (e *RealSearchEngine) findReferencesForSymbol(ctx context.Context, store *i
 			File:       ref.FilePath,
 			LineNumber: ref.Line,
 			Column:     ref.Column,
-			Match:      symbolID, // Use symbol name as match
+			Match:      symbolName, // Use symbol name as match
 			Metadata: map[string]string{
 				"kind":  ref.Kind,
 				"scope": "reference",
@@ -515,7 +545,7 @@ func (e *RealSearchEngine) findReferencesForSymbol(ctx context.Context, store *i
 	return results, nil
 }
 
-func (e *RealSearchEngine) findCallsForSymbol(ctx context.Context, store *index.Store, symbolID, filePath string) ([]SearchResult, error) {
+func (e *RealSearchEngine) findCallsForSymbol(ctx context.Context, store *index.Store, symbolID, symbolName string) ([]SearchResult, error) {
 	// Search for calls using the ref prefix, filtering for call kind
 	symbolHash := e.hashString(symbolID)
 	prefix := []byte("ref:" + symbolHash + ":")
@@ -536,7 +566,7 @@ func (e *RealSearchEngine) findCallsForSymbol(ctx context.Context, store *index.
 				File:       ref.FilePath,
 				LineNumber: ref.Line,
 				Column:     ref.Column,
-				Match:      symbolID, // Use symbol name as match
+				Match:      symbolName, // Use symbol name as match
 				Metadata: map[string]string{
 					"kind":      ref.Kind,
 					"scope":     "call",
@@ -1007,6 +1037,15 @@ func (p *placeholderParser) IsSupported(filePath string) bool {
 	return supportedExts[ext]
 }
 
+func (p *placeholderParser) ParseReferences(ctx context.Context, filePath string, symbolIndex index.SymbolIndex) ([]index.Reference, error) {
+	// Placeholder implementation - in a real implementation, this would parse references
+	return []index.Reference{}, nil
+}
+
+func (p *placeholderParser) SupportsReferences() bool {
+	return false // Placeholder doesn't support references
+}
+
 // rebuildIndex rebuilds the semantic search index
 func (e *RealSearchEngine) rebuildIndex(ctx context.Context) error {
 	if e.storage == nil {
@@ -1022,11 +1061,12 @@ func (e *RealSearchEngine) rebuildIndex(ctx context.Context) error {
 	// Configure builder
 	builderConfig := index.DefaultBuilderConfig()
 	builderConfig.ReportProgress = true
-	builderConfig.Verbose = false // Keep quiet during search
+	builderConfig.Verbose = true // Enable verbose output for debugging
 
 	builder := index.NewBuilder(store, parser, builderConfig)
 
 	// Rebuild index for the configured paths
+	fmt.Printf("Debug: Rebuilding index for paths: %v\n", e.config.Paths)
 	startTime := time.Now()
 	stats, err := builder.RebuildIndex(ctx, e.config.Paths...)
 	if err != nil {
@@ -1034,8 +1074,13 @@ func (e *RealSearchEngine) rebuildIndex(ctx context.Context) error {
 	}
 
 	duration := time.Since(startTime)
-	fmt.Printf("✅ Index rebuilt: %d files, %d symbols in %v\n",
-		stats.FilesProcessed, stats.SymbolsIndexed, duration.Round(time.Millisecond))
+	if stats.ReferencesIndexed > 0 {
+		fmt.Printf("✅ Index rebuilt: %d files, %d symbols, %d references in %v\n",
+			stats.FilesProcessed, stats.SymbolsIndexed, stats.ReferencesIndexed, duration.Round(time.Millisecond))
+	} else {
+		fmt.Printf("✅ Index rebuilt: %d files, %d symbols in %v\n",
+			stats.FilesProcessed, stats.SymbolsIndexed, duration.Round(time.Millisecond))
+	}
 
 	if stats.FilesErrored > 0 {
 		fmt.Printf("⚠️  %d files had errors during indexing\n", stats.FilesErrored)

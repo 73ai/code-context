@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -169,6 +170,9 @@ type Reference struct {
 	Context    string `json:"context,omitempty"`
 }
 
+// SymbolIndex represents a collection of symbols for reference finding
+type SymbolIndex []SymbolInfo
+
 // QueryResult caches search results for performance
 type QueryResult struct {
 	Query     string        `json:"query"`
@@ -189,7 +193,7 @@ func FileKey(pathHash string) []byte {
 }
 
 func RefKey(symbolHash, fileHash string, line int) []byte {
-	return []byte(PrefixRef + symbolHash + ":" + fileHash + ":" + string(rune(line)))
+	return []byte(fmt.Sprintf("%s%s:%s:%d", PrefixRef, symbolHash, fileHash, line))
 }
 
 func NameKey(name string) []byte {

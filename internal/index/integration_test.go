@@ -91,6 +91,42 @@ func (m *MockSymbolParser) IsSupported(filePath string) bool {
 	return supportedExts[ext]
 }
 
+func (m *MockSymbolParser) ParseReferences(ctx context.Context, filePath string, symbolIndex SymbolIndex) ([]Reference, error) {
+	// Create mock references for testing
+	var references []Reference
+
+	// Create some sample references based on the file
+	if len(symbolIndex) > 0 {
+		// Reference the first symbol in the index
+		references = append(references, Reference{
+			SymbolID: symbolIndex[0].ID,
+			FilePath: filePath,
+			Line:     10,
+			Column:   5,
+			Kind:     "reference",
+			Context:  "mock reference context",
+		})
+
+		// Add a second reference if there are multiple symbols
+		if len(symbolIndex) > 1 {
+			references = append(references, Reference{
+				SymbolID: symbolIndex[1].ID,
+				FilePath: filePath,
+				Line:     20,
+				Column:   8,
+				Kind:     "call",
+				Context:  "mock call reference",
+			})
+		}
+	}
+
+	return references, nil
+}
+
+func (m *MockSymbolParser) SupportsReferences() bool {
+	return true
+}
+
 // TestIntegrationFullWorkflow tests the complete indexing workflow
 func TestIntegrationFullWorkflow(t *testing.T) {
 	// Create temporary directory structure
